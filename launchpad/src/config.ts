@@ -1,6 +1,7 @@
 // src/config.ts
 import * as dotenv from 'dotenv';
-dotenv.config();
+dotenv.config({ path: '.env' });
+dotenv.config({ path: '.env.local', override: true }); // .env.local takes precedence
 
 function requireEnv(key: string): string {
   const val = process.env[key];

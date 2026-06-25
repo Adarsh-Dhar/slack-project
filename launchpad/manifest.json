@@ -23,15 +23,22 @@
       "bot": [
         "channels:history",
         "channels:read",
+        "channels:manage",
         "chat:write",
         "chat:write.public",
         "commands",
         "groups:history",
         "groups:read",
+        "groups:write",
         "im:write",
+        "im:read",
+        "im:history",
         "users:read",
         "canvases:write",
-        "canvases:read"
+        "canvases:read",
+        "conversations.connect:write",
+        "bookmarks:write",
+        "bookmarks:read"
       ]
     }
   },
