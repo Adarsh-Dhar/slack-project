@@ -13,8 +13,14 @@ export const config = {
   SLACK_BOT_TOKEN: requireEnv('SLACK_BOT_TOKEN'),
   SLACK_SIGNING_SECRET: requireEnv('SLACK_SIGNING_SECRET'),
   SLACK_APP_TOKEN: requireEnv('SLACK_APP_TOKEN'),
+  GITHUB_TOKEN: requireEnv('GITHUB_TOKEN'),
   PORT: parseInt(process.env['PORT'] ?? '3000', 10),
   DB_PATH: process.env['DB_PATH'] ?? './launchpad.db',
+
+  // GitHub Models
+  GITHUB_MODELS_ENDPOINT: 'https://models.github.ai/inference/chat/completions',
+  GITHUB_MODELS_MODEL: 'openai/gpt-4o-mini',
+  GITHUB_MODELS_API_VERSION: '2022-11-28',
 
   GO_NO_GO_DAYS_BEFORE: 2,
   STANDUP_HOUR: 9,

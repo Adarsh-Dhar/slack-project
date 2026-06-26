@@ -15,6 +15,12 @@
         "description": "Kick off a product launch workflow",
         "usage_hint": "[launch-name] [date YYYY-MM-DD]",
         "should_escape": false
+      },
+      {
+        "command": "/agent",
+        "description": "Ask the LaunchPad AI agent a question",
+        "usage_hint": "[your question]",
+        "should_escape": false
       }
     ]
   },

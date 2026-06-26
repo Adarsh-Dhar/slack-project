@@ -2,6 +2,7 @@
 import { App } from '@slack/bolt';
 import { config } from './config';
 import { registerLaunchCommand } from './handlers/launch';
+import { registerAgentCommand } from './handlers/agent';
 import { registerActions } from './handlers/actions';
 import { registerEvents } from './handlers/events';
 import { registerScheduledJobs } from './handlers/standup';
@@ -14,6 +15,7 @@ const app = new App({
 });
 
 registerLaunchCommand(app);
+registerAgentCommand(app);
 registerActions(app);
 registerEvents(app);
 registerScheduledJobs(app);
@@ -21,4 +23,5 @@ registerScheduledJobs(app);
 (async () => {
   await app.start(config.PORT);
   console.log(`⚡ LaunchPad is running on port ${config.PORT}`);
+  console.log(`🤖 /agent command powered by gpt-4o-mini via GitHub Models`);
 })();
