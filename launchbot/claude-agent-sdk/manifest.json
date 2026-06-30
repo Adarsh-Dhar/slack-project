@@ -1,6 +1,7 @@
 {
   "display_information": {
-    "name": "Starter Agent - Claude SDK"
+    "name": "LaunchBot",
+    "description": "Launch coordination bot with AI agent capabilities"
   },
   "features": {
     "assistant_view": {
@@ -13,9 +14,29 @@
       "messages_tab_read_only_enabled": false
     },
     "bot_user": {
-      "display_name": "Starter Agent - Claude SDK (JavaScript)",
+      "display_name": "LaunchBot",
       "always_online": true
-    }
+    },
+    "slash_commands": [
+      {
+        "command": "/launch",
+        "description": "Kick off a product launch workflow",
+        "usage_hint": "[\"launch-name\"] date:YYYY-MM-DD tier:major|moderate|minor",
+        "should_escape": false
+      },
+      {
+        "command": "/launch-phase",
+        "description": "Manually force a phase transition",
+        "usage_hint": "status | set <phase>",
+        "should_escape": false
+      },
+      {
+        "command": "/retro",
+        "description": "Trigger the post-launch retro early",
+        "usage_hint": "(run inside a launch channel)",
+        "should_escape": false
+      }
+    ]
   },
   "oauth_config": {
     "redirect_urls": ["https://ngrok-free.app/slack/oauth_redirect"],
@@ -43,14 +64,22 @@
       "bot": [
         "app_mentions:read",
         "channels:history",
+        "channels:join",
+        "channels:manage",
+        "channels:read",
         "chat:write",
+        "chat:write.public",
+        "commands",
         "groups:history",
+        "groups:read",
+        "groups:write",
         "im:history",
         "im:read",
         "im:write",
         "reactions:write",
         "reactions:read",
         "users:read",
+        "usergroups:read",
         "assistant:write"
       ]
     }
