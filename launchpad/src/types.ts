@@ -30,6 +30,11 @@ export interface LaunchRow {
   retro_completed_at: string | null;
   outcome_summary: string | null;
   current_phase: LaunchPhase;
+  github_repo: string | null;
+  legal_signoff_required: 0 | 1;
+  legal_signed_off_at: string | null;
+  last_pr_alert_at: string | null;
+  last_legal_escalated_at: string | null;
   created_at: string;
 }
 
@@ -41,6 +46,9 @@ export interface ItemRow {
   owner_id: string | null;
   due_date: string | null;
   status: ItemStatus;
+  last_dm_sent_at: string | null;
+  last_dm_acked_at: string | null;
+  last_escalated_at: string | null;
   created_at: string;
 }
 
@@ -67,6 +75,8 @@ export interface CreateLaunchInput {
   launchDate: string;
   pmUserId: string;
   tier: LaunchTier;           // NEW
+  githubRepo?: string | null;
+  legalSignoffRequired?: boolean;
 }
 
 export interface CreateItemInput {
@@ -90,6 +100,7 @@ export interface ParsedLaunchCommand {
   featureName: string;
   launchDate: string;        // ISO date
   tier: LaunchTier;           // NEW
+  githubRepo: string | null;  // NEW, optional: repo:org/name
   mentionedUsers: string[];  // Slack user IDs
   mentionedChannels: string[]; // Slack channel IDs
 }

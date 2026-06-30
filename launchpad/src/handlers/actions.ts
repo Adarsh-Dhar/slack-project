@@ -29,6 +29,7 @@ export function registerActions(app: App): void {
     const value = (action as ButtonAction).value ?? '{}';
     const { itemId, launchId } = JSON.parse(value) as StandupActionValue;
     db.updateItemStatus(itemId, 'done');
+    db.markStandupAcked(itemId);
 
     const launch = db.getLaunchById(launchId);
     if (!launch) return;
@@ -62,6 +63,7 @@ export function registerActions(app: App): void {
     const value = (action as ButtonAction).value ?? '{}';
     const { itemId, launchId } = JSON.parse(value) as StandupActionValue;
     db.updateItemStatus(itemId, 'blocked');
+    db.markStandupAcked(itemId);
 
     const b = body as BlockActionBody;
     await client.views.open({
@@ -96,6 +98,7 @@ export function registerActions(app: App): void {
     const value = (action as ButtonAction).value ?? '{}';
     const { itemId } = JSON.parse(value) as StandupActionValue;
     db.updateItemStatus(itemId, 'in_progress');
+    db.markStandupAcked(itemId);
 
     const b = body as BlockActionBody;
     const channelId = b.channel?.id;
@@ -204,6 +207,35 @@ export function registerActions(app: App): void {
     await client.chat.postMessage({
       channel: launch.channel_id,
       text: `🔴 *Launch on hold.* <@${body.user.id}> held the Go/No-Go. Discuss outstanding items in this channel.`,
+    });
+  });
+
+  // ─── Legal: mark signed off ───────────────────────────────────────────────
+  app.action('legal_signoff', async ({ ack, body, client, action }) => {
+    await ack();
+    if (action.type !== 'button') return;
+
+    const launchId = Number((action as ButtonAction).value);
+    const launch = db.getLaunchById(launchId);
+    if (!launch) return;
+
+    db.markLegalSignedOff(launchId);
+
+    const b = body as BlockActionBody;
+    const channelId = b.channel?.id;
+    const ts = b.message?.ts;
+    if (channelId && ts) {
+      await client.chat.update({
+        channel: channelId,
+        ts,
+        text: `✅ Legal signed off by <@${body.user.id}>.`,
+        blocks: [],
+      });
+    }
+
+    await client.chat.postMessage({
+      channel: launch.channel_id,
+      text: `✅ *Legal sign-off complete* for *${launch.name}*, confirmed by <@${body.user.id}>.`,
     });
   });
 

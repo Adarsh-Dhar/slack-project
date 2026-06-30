@@ -9,6 +9,7 @@ import { runGoNoGo } from '../services/goNoGo';
 import { executeLaunch } from '../services/launchDay';
 import { postRetroPrompt } from '../services/retro';
 import { checkAndSyncPhase } from '../services/phaseManager';
+import { getOpenPRs } from '../services/githubPRs';
 import type { ItemRow } from '../types';
 
 export function registerScheduledJobs(app: App): void {
@@ -50,6 +51,7 @@ export function registerScheduledJobs(app: App): void {
             text: `Daily check-in for ${launch.name}`,
             blocks,
           })
+          .then(() => db.markStandupDmSent(topItem.id))
           .catch((err: Error) =>
             console.error(`[Standup] DM failed for ${ownerId}:`, err.message)
           );
@@ -82,6 +84,102 @@ export function registerScheduledJobs(app: App): void {
           console.error(`[LaunchDay] Failed for launch ${launch.id}:`, err.message)
         );
       }
+    }
+  });
+
+  // ─── Open-PR check: hourly, throttled to once/24h per launch via DB ─────
+  // Fires for any launch within 48h of T=0 that has a github_repo set.
+  cron.schedule('15 * * * *', async () => {
+    const launches = db.getLaunchesNeedingPrCheck();
+    if (launches.length === 0) return;
+
+    console.log(`[PRCheck] Checking ${launches.length} launch(es) for open PRs...`);
+
+    for (const launch of launches) {
+      if (!launch.github_repo) continue;
+
+      const openPRs = await getOpenPRs(launch.github_repo);
+      if (openPRs.length === 0) continue;
+
+      await client.chat
+        .postMessage({
+          channel: launch.channel_id,
+          text: `🔴 *${openPRs.length} open PR(s)* on \`${launch.github_repo}\` with ≤48h to launch:`,
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text:
+                  `🔴 *${openPRs.length} open PR(s)* on \`${launch.github_repo}\` with ≤48h to launch *${launch.name}*:\n\n` +
+                  openPRs.map((pr: any) => `• <${pr.url}|#${pr.number} ${pr.title}> — @${pr.author}`).join('\n'),
+              },
+            },
+          ],
+        })
+        .then(() => db.markPrAlertSent(launch.id))
+        .catch((err: Error) =>
+          console.error(`[PRCheck] Failed to alert launch ${launch.id}:`, err.message)
+        );
+    }
+  });
+
+  // ─── Legal sign-off SLA: hourly, throttled to once/24h per launch ───────
+  cron.schedule('20 * * * *', async () => {
+    const launches = db.getLaunchesNeedingLegalEscalation();
+    if (launches.length === 0) return;
+
+    console.log(`[LegalSLA] Escalating ${launches.length} launch(es) missing legal sign-off...`);
+
+    for (const launch of launches) {
+      await client.chat
+        .postMessage({
+          channel: launch.channel_id,
+          text:
+            `⚖️ *Legal sign-off still outstanding* for *${launch.name}* with ≤48h to launch. ` +
+            `<@${launch.pm_user_id}> — please follow up in <#${launch.channel_id}> or the legal-review channel.`,
+        })
+        .then(() => db.markLegalEscalated(launch.id))
+        .catch((err: Error) =>
+          console.error(`[LegalSLA] Failed to escalate launch ${launch.id}:`, err.message)
+        );
+    }
+  });
+
+  // ─── 24h standup SLA nudge: hourly, throttled to once/24h per item ──────
+  cron.schedule('30 * * * *', async () => {
+    const overdueItems = db.getItemsAwaitingReply();
+    if (overdueItems.length === 0) return;
+
+    console.log(`[StandupSLA] Nudging ${overdueItems.length} item(s) with no reply in 24h...`);
+
+    for (const item of overdueItems) {
+      if (!item.owner_id) continue;
+      const launch = db.getLaunchById(item.launch_id);
+      if (!launch) continue;
+
+      // Re-DM the owner
+      await client.chat
+        .postMessage({
+          channel: item.owner_id,
+          text:
+            `⏰ *Still waiting on a reply* for *${item.title}* (${launch.name}) — ` +
+            `no response in 24h. Could you give a quick status update?`,
+        })
+        .catch((err: Error) =>
+          console.error(`[StandupSLA] DM nudge failed for ${item.owner_id}:`, err.message)
+        );
+
+      // Surface it to the PM in the launch channel too
+      await client.chat
+        .postMessage({
+          channel: launch.channel_id,
+          text: `⏰ <@${item.owner_id}> hasn't responded to the standup check-in for *${item.title}* in 24h.`,
+        })
+        .then(() => db.markItemEscalated(item.id))
+        .catch((err: Error) =>
+          console.error(`[StandupSLA] Channel alert failed for item ${item.id}:`, err.message)
+        );
     }
   });
 

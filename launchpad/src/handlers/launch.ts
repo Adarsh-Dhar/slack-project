@@ -19,7 +19,7 @@ export function registerLaunchCommand(app: App): void {
 
     try {
       // 1. Parse command text
-      const { featureName, launchDate, tier, mentionedUsers, mentionedChannels } =
+      const { featureName, launchDate, tier, githubRepo, mentionedUsers, mentionedChannels } =
         parseLaunchCommand(command.text);
 
       console.log('[DEBUG] raw command.text:', JSON.stringify(command.text));
@@ -53,6 +53,8 @@ export function registerLaunchCommand(app: App): void {
         launchDate,
         pmUserId,
         tier,
+        githubRepo,
+        legalSignoffRequired: tier === 'major',
       });
 
       // 6b. Now register sub-channels with the real launchId
@@ -60,7 +62,38 @@ export function registerLaunchCommand(app: App): void {
         db.addStakeholderChannel({ launchId, channelId, team: sub.team });
       }
 
-      // 6c. Register team rosters — prefer User Group, fallback to mentioned users
+      // 6c. Major tier requires legal sign-off — post the button in the
+      // legal-review channel so the legal team can mark it complete.
+      const legalChannel = subChannels.find(s => s.sub.team === 'legal');
+      if (tier === 'major' && legalChannel) {
+        await client.chat.postMessage({
+          channel: legalChannel.channelId,
+          text: `⚖️ Legal review needed for *${featureName}* (launching ${launchDate}).`,
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: `⚖️ *Legal review needed* for *${featureName}* (launching ${launchDate}). Click below once reviewed and approved.`,
+              },
+            },
+            {
+              type: 'actions',
+              elements: [
+                {
+                  type: 'button',
+                  text: { type: 'plain_text', text: '✅ Mark Signed Off', emoji: true },
+                  style: 'primary',
+                  action_id: 'legal_signoff',
+                  value: String(launchId),
+                },
+              ],
+            },
+          ],
+        });
+      }
+
+      // 6d. Register team rosters — prefer User Group, fallback to mentioned users
       const teamsInTier = [...new Set(subChannels.map(s => s.sub.team))];
       for (const team of teamsInTier) {
         const usergroupId = config.TEAM_USERGROUP_MAP[team] || null;
