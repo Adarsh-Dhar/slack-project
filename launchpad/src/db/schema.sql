@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS launches (
   channel_id  TEXT NOT NULL UNIQUE,
   launch_date TEXT NOT NULL,
   pm_user_id  TEXT NOT NULL,
+  tier        TEXT DEFAULT 'moderate',
   canvas_id   TEXT,
   status      TEXT DEFAULT 'active',
   created_at  TEXT DEFAULT (datetime('now'))

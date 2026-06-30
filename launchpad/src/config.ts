@@ -1,5 +1,6 @@
 // src/config.ts
 import * as dotenv from 'dotenv';
+import type { LaunchTier, SubChannel, TeamName } from './types';
 dotenv.config({ path: '.env' });
 dotenv.config({ path: '.env.local', override: true }); // .env.local takes precedence
 
@@ -38,4 +39,24 @@ export const config = {
     'blocking us',
     'blocked on',
   ] as readonly string[],
+
+  TIER_CHANNELS: {
+    major: [
+      { suffix: 'eng',          team: 'engineering' as TeamName, purpose: 'Engineering build coordination' },
+      { suffix: 'mktg',         team: 'marketing'   as TeamName, purpose: 'Marketing copy, assets, announcements' },
+      { suffix: 'cs-readiness', team: 'sales'       as TeamName, purpose: 'CS and sales enablement' },
+      { suffix: 'legal-review', team: 'legal'       as TeamName, purpose: 'Legal and compliance sign-off' },
+      { suffix: 'docs',         team: 'docs'        as TeamName, purpose: 'Documentation and help center' },
+    ] as SubChannel[],
+
+    moderate: [
+      { suffix: 'eng',  team: 'engineering' as TeamName, purpose: 'Engineering build coordination' },
+      { suffix: 'mktg', team: 'marketing'   as TeamName, purpose: 'Marketing copy and announcements' },
+      { suffix: 'docs', team: 'docs'        as TeamName, purpose: 'Documentation updates' },
+    ] as SubChannel[],
+
+    minor: [
+      // Minor launches only get the main #launch-x channel, no sub-channels
+    ] as SubChannel[],
+  } as const satisfies Record<LaunchTier, SubChannel[]>,
 } as const;

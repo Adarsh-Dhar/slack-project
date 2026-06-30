@@ -6,12 +6,23 @@ export type LaunchStatus = 'active' | 'approved' | 'launched' | 'cancelled';
 export type ItemStatus = 'not_started' | 'in_progress' | 'done' | 'blocked';
 export type TeamName = 'engineering' | 'marketing' | 'docs' | 'legal' | 'sales' | 'other';
 
+// ─── Launch tier ─────────────────────────────────────────────────────────────
+export type LaunchTier = 'major' | 'moderate' | 'minor';
+
+// ─── Sub-channel descriptor ───────────────────────────────────────────────────
+export interface SubChannel {
+  suffix: string;          // e.g. 'eng', 'mktg', 'cs-readiness'
+  team: TeamName;          // maps to TeamName for stakeholder tracking
+  purpose: string;         // set as channel purpose/description
+}
+
 export interface LaunchRow {
   id: number;
   name: string;
   channel_id: string;
   launch_date: string;       // ISO date string e.g. "2025-07-15"
   pm_user_id: string;
+  tier: LaunchTier;           // NEW
   canvas_id: string | null;
   status: LaunchStatus;
   created_at: string;
@@ -42,6 +53,7 @@ export interface CreateLaunchInput {
   channelId: string;
   launchDate: string;
   pmUserId: string;
+  tier: LaunchTier;           // NEW
 }
 
 export interface CreateItemInput {
@@ -64,6 +76,7 @@ export interface AddStakeholderChannelInput {
 export interface ParsedLaunchCommand {
   featureName: string;
   launchDate: string;        // ISO date
+  tier: LaunchTier;           // NEW
   mentionedUsers: string[];  // Slack user IDs
   mentionedChannels: string[]; // Slack channel IDs
 }

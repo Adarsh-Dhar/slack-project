@@ -6,6 +6,7 @@ import { parseLaunchCommand } from '../utils/parseCommand';
 import { scanAllStakeholderChannels } from '../services/channelScanner';
 import { createLaunchCanvas, DEFAULT_CHECKLIST } from '../services/canvasBuilder';
 import { notifyItemOwner, postOwnershipSummary } from '../services/ownership';
+import { createLaunchChannels, buildChannelSummaryMessage } from '../services/channelManager';
 import type { TeamName } from '../types';
 
 export function registerLaunchCommand(app: App): void {
@@ -16,38 +17,25 @@ export function registerLaunchCommand(app: App): void {
 
     try {
       // 1. Parse command text
-      const { featureName, launchDate, mentionedUsers, mentionedChannels } =
+      const { featureName, launchDate, tier, mentionedUsers, mentionedChannels } =
         parseLaunchCommand(command.text);
 
-      // 2. Create launch channel
-      const channelName = `launch-${featureName
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, '-')
-        .replace(/-+/g, '-')
-        .slice(0, 75)}`;
-
-      const channelResult = await client.conversations.create({ name: channelName });
-      const launchChannelId = channelResult.channel?.id;
-      if (!launchChannelId) throw new Error('Failed to create launch channel');
-
-      // 3. Invite users
+      // 2–4. Create main + sub-channels based on tier
       const allUsers = [...new Set([pmUserId, ...mentionedUsers])];
-      await client.conversations.invite({
-        channel: launchChannelId,
-        users: allUsers.join(','),
-      });
 
-      // 4. Set topic
-      await client.conversations.setTopic({
-        channel: launchChannelId,
-        topic: `🚀 ${featureName} — Launch: ${launchDate} | Managed by LaunchPad`,
-      });
+      const { mainChannelId, subChannels } = await createLaunchChannels(
+        client,
+        featureName,
+        tier,
+        allUsers
+      );
+      const launchChannelId = mainChannelId;
 
       // 5. Welcome message
-      await client.chat.postMessage({
-        channel: launchChannelId,
-        text: `👋 Welcome to *${featureName}* launch coordination!\n\nLaunchPad is scanning stakeholder channels and building the readiness canvas. Stand by...`,
-      });
+      const welcomeMsg = buildChannelSummaryMessage(
+        featureName, tier, launchChannelId, subChannels
+      );
+      await client.chat.postMessage({ channel: launchChannelId, text: welcomeMsg });
 
       // 6. Save launch to DB
       const launchId = db.createLaunch({
@@ -55,7 +43,13 @@ export function registerLaunchCommand(app: App): void {
         channelId: launchChannelId,
         launchDate,
         pmUserId,
+        tier,
       });
+
+      // 6b. Now register sub-channels with the real launchId
+      for (const { channelId, sub } of subChannels) {
+        db.addStakeholderChannel({ launchId, channelId, team: sub.team });
+      }
 
       // 7. Register stakeholder channels
       for (const chanId of mentionedChannels) {

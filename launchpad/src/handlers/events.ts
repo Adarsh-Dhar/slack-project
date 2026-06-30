@@ -4,7 +4,41 @@ import type { GenericMessageEvent } from '@slack/types';
 import * as db from '../db';
 import { checkForSlip } from '../services/slipDetector';
 
+// Cache channel ID → name to avoid repeated API calls (and duplicate-delivery
+// from Socket Mode retries when the handler is slow).
+const channelNameCache = new Map<string, string>();
+
+async function resolveChannelName(
+  client: Parameters<Parameters<App['message']>[0]>['0']['client'],
+  channelId: string,
+): Promise<string> {
+  if (channelNameCache.has(channelId)) {
+    return channelNameCache.get(channelId)!;
+  }
+  try {
+    const info = await client.conversations.info({ channel: channelId });
+    const name = (info.channel as { name?: string })?.name ?? channelId;
+    channelNameCache.set(channelId, name);
+    return name;
+  } catch {
+    channelNameCache.set(channelId, channelId);
+    return channelId;
+  }
+}
+
 export function registerEvents(app: App): void {
+
+  // ─── Message logger: print every user message to the terminal ────────────
+  app.message(async ({ message, client }) => {
+    if (message.subtype !== undefined) return; // skip edits, joins, bot posts
+    const msg = message as GenericMessageEvent;
+    if (!msg.user) return;
+
+    const channelName = await resolveChannelName(client, msg.channel);
+    const timestamp = new Date(parseFloat(msg.ts) * 1000).toISOString();
+
+    console.log(`[${timestamp}] #${channelName} | <${msg.user}> ${msg.text ?? '(no text)'}`);
+  });
 
   // ─── Message event: slip detection ──────────────────────────────────────
   app.message(async ({ message, client }) => {
@@ -17,13 +51,7 @@ export function registerEvents(app: App): void {
     const launch = db.getLaunchByStakeholderChannel(msg.channel);
     if (!launch || launch.status !== 'active') return;
 
-    let channelName: string = msg.channel;
-    try {
-      const info = await client.conversations.info({ channel: msg.channel });
-      channelName = (info.channel as { name?: string })?.name ?? msg.channel;
-    } catch {
-      // Non-critical — channel name is just for display
-    }
+    const channelName = await resolveChannelName(client, msg.channel);
 
     await checkForSlip(client, { message: msg, launch, channelName });
   });

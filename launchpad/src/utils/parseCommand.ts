@@ -1,5 +1,5 @@
 // src/utils/parseCommand.ts
-import type { ParsedLaunchCommand } from '../types';
+import type { ParsedLaunchCommand, LaunchTier } from '../types';
 
 const MONTH_MAP: Record<string, number> = {
   january: 1,  february: 2,  march: 3,    april: 4,
@@ -26,10 +26,16 @@ function parseDate(raw: string): string {
   return `${year}-${month}-${day}`;
 }
 
+function parseTier(text: string): LaunchTier {
+  const match = text.match(/tier:(major|moderate|minor)/i);
+  if (!match) return 'moderate'; // safe default
+  return match[1]!.toLowerCase() as LaunchTier;
+}
+
 export function parseLaunchCommand(text: string): ParsedLaunchCommand {
   const nameMatch = text.match(/"([^"]+)"/);
   if (!nameMatch) {
-    throw new Error('Missing feature name in quotes. Usage: /launch "Feature Name" date:July-1 ...');
+    throw new Error('Missing feature name in quotes. Usage: /launch "Feature Name" date:July-1 tier:major ...');
   }
   const featureName = nameMatch[1]!;
 
@@ -39,11 +45,10 @@ export function parseLaunchCommand(text: string): ParsedLaunchCommand {
   }
   const launchDate = parseDate(dateMatch[1]!);
 
-  // <@U12345> or <@U12345|name>
-  const mentionedUsers = [...text.matchAll(/<@([A-Z0-9]+)(?:\|[^>]+)?>/g)].map(m => m[1]!);
+  const tier = parseTier(text);    // NEW
 
-  // <#C12345|name>
+  const mentionedUsers = [...text.matchAll(/<@([A-Z0-9]+)(?:\|[^>]+)?>/g)].map(m => m[1]!);
   const mentionedChannels = [...text.matchAll(/<#([A-Z0-9]+)(?:\|[^>]+)?>/g)].map(m => m[1]!);
 
-  return { featureName, launchDate, mentionedUsers, mentionedChannels };
+  return { featureName, launchDate, tier, mentionedUsers, mentionedChannels };
 }

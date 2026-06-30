@@ -20,8 +20,8 @@ db.exec(schema);
 
 export function createLaunch(input: CreateLaunchInput): number {
   const stmt = db.prepare<CreateLaunchInput>(
-    `INSERT INTO launches (name, channel_id, launch_date, pm_user_id)
-     VALUES (@name, @channelId, @launchDate, @pmUserId)`
+    `INSERT INTO launches (name, channel_id, launch_date, pm_user_id, tier)
+     VALUES (@name, @channelId, @launchDate, @pmUserId, @tier)`
   );
   const result = stmt.run(input);
   return result.lastInsertRowid as number;
