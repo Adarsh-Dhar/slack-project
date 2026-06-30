@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS launches (
   pm_user_id  TEXT NOT NULL,
   tier        TEXT DEFAULT 'moderate',
   canvas_id   TEXT,
+  github_repo TEXT,
   status      TEXT DEFAULT 'active',
   current_phase TEXT DEFAULT 'discovery',
   retro_scheduled_for TEXT,        -- ISO date, set when retro prompt is posted
@@ -22,6 +23,8 @@ CREATE TABLE IF NOT EXISTS items (
   owner_id    TEXT,
   due_date    TEXT,
   status      TEXT DEFAULT 'not_started',
+  last_notified_at TEXT,
+  notify_count      INTEGER DEFAULT 0,
   created_at  TEXT DEFAULT (datetime('now'))
 );
 

@@ -32,6 +32,11 @@ function parseTier(text) {
   return match[1].toLowerCase();
 }
 
+function parseRepo(text) {
+  const repoMatch = text.match(/repo:([\w-]+\/[\w.-]+)/i);
+  return repoMatch ? repoMatch[1] : null;
+}
+
 export function parseLaunchCommand(text) {
   const nameMatch = text.match(/"([^"]+)"/);
   if (!nameMatch) {
@@ -46,9 +51,10 @@ export function parseLaunchCommand(text) {
   const launchDate = parseDate(dateMatch[1]);
 
   const tier = parseTier(text);
+  const githubRepo = parseRepo(text);
 
   const mentionedUsers = [...text.matchAll(/<@([A-Z0-9]+)(?:\|[^>]+)?>/g)].map(m => m[1]);
   const mentionedChannels = [...text.matchAll(/<#([A-Z0-9]+)(?:\|[^>]+)?>/g)].map(m => m[1]);
 
-  return { featureName, launchDate, tier, mentionedUsers, mentionedChannels };
+  return { featureName, launchDate, tier, githubRepo, mentionedUsers, mentionedChannels };
 }

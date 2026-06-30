@@ -1,6 +1,7 @@
 import { handleFeedbackButton } from './feedback-buttons.js';
 import * as retroActions from './retro-actions.js';
 import * as agentConfirmations from './agent-confirmations.js';
+import * as standupActions from './standup-actions.js';
 
 /**
  * Register action listeners with the Bolt app.
@@ -11,4 +12,5 @@ export function register(app) {
   app.action('feedback', handleFeedbackButton);
   retroActions.register(app);
   agentConfirmations.register(app);
+  standupActions.register(app);
 }

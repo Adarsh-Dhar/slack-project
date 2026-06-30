@@ -42,6 +42,12 @@ You have access to launch management tools for creating and managing product lau
 
 For destructive actions (create_launch, trigger_retro), always use the confirmation tools first — they post a button for the user to click before executing. This prevents accidental channel creation or archiving.
 
+## CRITICAL RULE FOR LAUNCH ACTIONS
+If the user asks to create, start, wrap up, finish, close, or archive a launch, you MUST call the 
+appropriate tool (create_launch_confirmation or trigger_retro_confirmation) in this same turn. 
+NEVER describe a button, link, or confirmation in plain text — you have no ability to create 
+clickable UI through text. If you don't call the tool, nothing happens and the user is misled.
+
 ## SLACK MCP SERVER
 You may have access to the Slack MCP Server, which gives you powerful Slack tools \
 beyond your built-in tools. Use them whenever they would help the user.
@@ -138,7 +144,7 @@ const getLaunchStatus = tool({
 
 const createLaunchConfirmation = tool({
   name: 'create_launch_confirmation',
-  description: 'Post a confirmation button to create a new launch. This is a safety measure - the user must click the button to proceed. Does NOT create the launch directly.',
+  description: 'Use this ONLY when the user wants to start/kick off/create a brand NEW launch. Never use this for wrapping up, closing, finishing, ending, completing, or archiving an existing launch — use trigger_retro_confirmation for that. Post a confirmation button to create a new launch. This is a safety measure - the user must click the button to proceed. Does NOT create the launch directly.',
   parameters: z.object({
     feature_name: z.string().describe('The name of the feature (e.g. "New Dashboard")'),
     launch_date: z.string().describe('Launch date in ISO format (YYYY-MM-DD) or Month-Day (e.g. July-1)'),
@@ -193,7 +199,7 @@ const createLaunchConfirmation = tool({
 
 const triggerRetroConfirmation = tool({
   name: 'trigger_retro_confirmation',
-  description: 'Post a confirmation button to start a retro for the current channel. This is a safety measure - the user must click the button to proceed.',
+  description: 'Use this when the user wants to wrap up, close out, finish, end, complete, or archive an existing launch, or start its retro. This is for EXISTING launches only — never use this to create a new launch. Post a confirmation button to start a retro for the current channel. This is a safety measure - the user must click the button to proceed.',
   parameters: z.object({}),
   execute: async (_args, context) => {
     const deps = context?.context;
@@ -348,20 +354,25 @@ export const starterAgent = new Agent({
  * @returns {Promise<import('@openai/agents').RunResult<any, any>>}
  */
 export async function runAgent(inputItems, deps) {
-  if (deps.userToken) {
-    const mcpServer = new MCPServerStreamableHttp({
-      url: SLACK_MCP_URL,
-      requestInit: { headers: { Authorization: `Bearer ${deps.userToken}` } },
-    });
+  const result = deps.userToken
+    ? await runAgentWithMcp(inputItems, deps)
+    : await run(starterAgent, inputItems, { context: deps });
+  
+  console.log('[agent] tool calls this turn:', result.newItems?.filter(i => i.type === 'tool_call_item').length ?? 0);
+  return result;
+}
 
-    try {
-      await mcpServer.connect();
-      const agentWithMcp = starterAgent.clone({ mcpServers: [mcpServer] });
-      return await run(agentWithMcp, inputItems, { context: deps });
-    } finally {
-      await mcpServer.close();
-    }
+async function runAgentWithMcp(inputItems, deps) {
+  const mcpServer = new MCPServerStreamableHttp({
+    url: SLACK_MCP_URL,
+    requestInit: { headers: { Authorization: `Bearer ${deps.userToken}` } },
+  });
+
+  try {
+    await mcpServer.connect();
+    const agentWithMcp = starterAgent.clone({ mcpServers: [mcpServer] });
+    return await run(agentWithMcp, inputItems, { context: deps });
+  } finally {
+    await mcpServer.close();
   }
-
-  return await run(starterAgent, inputItems, { context: deps });
 }

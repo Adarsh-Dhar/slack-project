@@ -59,4 +59,20 @@ export const config = {
     sales:       process.env['USERGROUP_SALES'] ?? '',
     other:       '',
   },
+
+  SLIP_KEYWORDS: [
+    'need more time',
+    'not ready',
+    'delayed',
+    'pushed back',
+    'behind schedule',
+    "won't make",
+    'need another day',
+    'need 2 more days',
+    'blocking us',
+    'blocked on',
+  ],
+
+  GO_NO_GO_DAYS_BEFORE: 2,
+  STANDUP_HOUR: 9,
 };

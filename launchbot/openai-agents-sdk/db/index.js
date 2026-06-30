@@ -20,8 +20,8 @@ db.exec(schema);
 
 export function createLaunch(input) {
   const stmt = db.prepare(
-    `INSERT INTO launches (name, channel_id, launch_date, pm_user_id, tier)
-     VALUES (@name, @channelId, @launchDate, @pmUserId, @tier)`
+    `INSERT INTO launches (name, channel_id, launch_date, pm_user_id, tier, github_repo)
+     VALUES (@name, @channelId, @launchDate, @pmUserId, @tier, @githubRepo)`
   );
   const result = stmt.run(input);
   return result.lastInsertRowid;
@@ -130,7 +130,7 @@ export function getItemsByLaunch(launchId) {
 }
 
 export function updateItemStatus(itemId, status) {
-  db.prepare('UPDATE items SET status = ? WHERE id = ?').run(status, itemId);
+  db.prepare('UPDATE items SET status = ?, last_notified_at = datetime(\'now\') WHERE id = ?').run(status, itemId);
 }
 
 export function updateItemOwner(itemId, ownerId) {
@@ -198,4 +198,17 @@ export function getAllRostersForLaunch(launchId) {
   return db
     .prepare(`SELECT * FROM team_rosters WHERE launch_id = ?`)
     .all(launchId);
+}
+
+export function markItemNotified(itemId) {
+  db.prepare(`UPDATE items SET last_notified_at = datetime('now'), notify_count = notify_count + 1 WHERE id = ?`).run(itemId);
+}
+
+export function getStaleItems(hoursThreshold) {
+  return db.prepare(`
+    SELECT * FROM items
+    WHERE status NOT IN ('done')
+      AND owner_id IS NOT NULL
+      AND (last_notified_at IS NULL OR last_notified_at <= datetime('now', '-' || ? || ' hours'))
+  `).all(hoursThreshold);
 }
