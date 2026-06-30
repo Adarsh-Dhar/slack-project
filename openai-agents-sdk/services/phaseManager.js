@@ -7,6 +7,7 @@
 import { differenceInCalendarDays } from 'date-fns';
 import * as db from '../db/index.js';
 import { config } from '../config.js';
+import { postLaunchDayRunbook } from './runbook.js';
 
 const PHASE_ORDER = ['discovery', 'build', 'prelaunch', 'gonogo', 'launchday'];
 
@@ -21,7 +22,7 @@ export function calculatePhase(launchDate) {
   return 'launchday';
 }
 
-async function resolveTeamMembers(client, launchId, team) {
+export async function resolveTeamMembers(client, launchId, team) {
   const usergroupId = config.TEAM_USERGROUP_MAP[team];
 
   if (usergroupId) {
@@ -109,6 +110,23 @@ export async function announcePhaseChange(client, launch, newPhase, added, remov
   }
 
   await client.chat.postMessage({ channel: launch.channel_id, text });
+
+  // Notify every sub-channel touched by this phase's roster change, not
+  // just main. syncMembersForPhaseChange already tells us which teams
+  // changed; cross-reference against the launch's registered sub-channels.
+  const touchedTeams = new Set([
+    ...config.PHASE_TEAM_MAP[newPhase],
+    ...(config.PHASE_TEAM_MAP[PHASE_ORDER[PHASE_ORDER.indexOf(newPhase) - 1]] ?? []),
+  ]);
+  const subChannels = db.getStakeholderChannels(launch.id)
+    .filter(c => touchedTeams.has(c.team));
+
+  for (const sc of subChannels) {
+    await client.chat.postMessage({
+      channel: sc.channel_id,
+      text: `*${launch.name}* has entered Phase: ${phaseLabels[newPhase]}.`,
+    }).catch(err => console.warn(`[phaseManager] Sub-channel notify failed for ${sc.channel_id}:`, err.message));
+  }
 }
 
 export async function checkAndSyncPhase(client, launch) {
@@ -131,4 +149,12 @@ export async function checkAndSyncPhase(client, launch) {
 
   db.updateLaunchPhase(launch.id, newPhase);
   await announcePhaseChange(client, launch, newPhase, added, removed);
+
+  // Once a launch crosses into launchday, post the runbook and repurpose
+  // the main channel as the war room.
+  if (newPhase === 'launchday') {
+    await postLaunchDayRunbook(client, launch).catch(err =>
+      console.error(`[phaseManager] Failed to post runbook for launch ${launch.id}:`, err)
+    );
+  }
 }

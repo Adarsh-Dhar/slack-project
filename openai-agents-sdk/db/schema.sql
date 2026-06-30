@@ -67,3 +67,20 @@ CREATE TABLE IF NOT EXISTS gonogo_overrides (
   resolved_at   TEXT,
   created_at    TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS notified_deadlines (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  launch_id     INTEGER NOT NULL REFERENCES launches(id),
+  deadline_key  TEXT NOT NULL,
+  notified_at   TEXT DEFAULT (datetime('now')),
+  UNIQUE(launch_id, deadline_key)
+);
+
+CREATE TABLE IF NOT EXISTS feedback (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  launch_id   INTEGER NOT NULL REFERENCES launches(id),
+  user_id     TEXT NOT NULL,
+  sentiment   TEXT CHECK (sentiment IN ('went_well', 'went_wrong')),
+  text        TEXT NOT NULL,
+  created_at  TEXT DEFAULT (datetime('now'))
+);

@@ -104,7 +104,7 @@ export function buildGoNoGoCanvasBlocks(input) {
   const greenCount = responses.filter(r => r.status === 'green').length;
   const redCount = responses.filter(r => r.status === 'red').length;
   const pendingCount = items.length - responses.length;
-  const statusEmoji = redCount > 0 ? '�' : pendingCount > 0 ? '🟡' : '🟢';
+  const statusEmoji = redCount > 0 ? '🔴' : pendingCount > 0 ? '🟡' : '🟢';
 
   const blocks = [
     {

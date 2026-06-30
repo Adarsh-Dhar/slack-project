@@ -276,3 +276,34 @@ export function resolveOverrideRequest(id, status, resolvedBy) {
     `UPDATE gonogo_overrides SET status = ?, resolved_by = ?, resolved_at = datetime('now') WHERE id = ?`
   ).run(status, resolvedBy, id);
 }
+
+// ─── Deadline reminder helpers ───────────────────────────────────────────────
+
+export function hasDeadlineBeenNotified(launchId, deadlineKey) {
+  const row = db
+    .prepare('SELECT 1 FROM notified_deadlines WHERE launch_id = ? AND deadline_key = ?')
+    .get(launchId, deadlineKey);
+  return !!row;
+}
+
+export function markDeadlineNotified(launchId, deadlineKey) {
+  db.prepare(
+    `INSERT INTO notified_deadlines (launch_id, deadline_key) VALUES (?, ?)
+     ON CONFLICT(launch_id, deadline_key) DO NOTHING`
+  ).run(launchId, deadlineKey);
+}
+
+// ─── Feedback helpers ────────────────────────────────────────────────────────
+
+export function addFeedback({ launchId, userId, sentiment, text }) {
+  db.prepare(
+    `INSERT INTO feedback (launch_id, user_id, sentiment, text)
+     VALUES (?, ?, ?, ?)`
+  ).run(launchId, userId, sentiment, text);
+}
+
+export function getFeedbackForLaunch(launchId) {
+  return db
+    .prepare('SELECT * FROM feedback WHERE launch_id = ? ORDER BY created_at ASC')
+    .all(launchId);
+}

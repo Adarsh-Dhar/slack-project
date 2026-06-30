@@ -7,6 +7,7 @@
 // @ts-nocheck
 
 import * as db from '../db/index.js';
+import { aggregateFeedback } from './feedback.js';
 
 /**
  * Post the retro prompt into the launch channel with a "Start Retro" button.
@@ -41,6 +42,12 @@ export async function postRetroPrompt(client, launch) {
             action_id: 'retro_start',
             value: String(launch.id),
           },
+          {
+            type: 'button',
+            text: { type: 'plain_text', text: '💬 Add Feedback', emoji: true },
+            action_id: 'feedback_add',
+            value: String(launch.id),
+          },
         ],
       },
     ],
@@ -51,6 +58,7 @@ export async function postRetroPrompt(client, launch) {
  * Build the outcome-logging modal shown when "Start Retro" is clicked.
  */
 export function buildOutcomeModal(launchId, launchName) {
+  const { wentWell, wentWrong } = aggregateFeedback(launchId);
   return {
     type: 'modal',
     callback_id: 'retro_outcome_submit',
@@ -71,6 +79,7 @@ export function buildOutcomeModal(launchId, launchName) {
           type: 'plain_text_input',
           action_id: 'input',
           multiline: true,
+          initial_value: wentWell || undefined,
         },
       },
       {
@@ -81,6 +90,7 @@ export function buildOutcomeModal(launchId, launchName) {
           type: 'plain_text_input',
           action_id: 'input',
           multiline: true,
+          initial_value: wentWrong || undefined,
         },
       },
       {

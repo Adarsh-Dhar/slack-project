@@ -4,6 +4,7 @@ import * as agentConfirmations from './agent-confirmations.js';
 import * as standupActions from './standup-actions.js';
 import * as slipActions from './slip-actions.js';
 import * as gonogoActions from './gonogo-actions.js';
+import * as launchFeedbackActions from './launch-feedback-actions.js';
 
 /**
  * Register action listeners with the Bolt app.
@@ -17,4 +18,5 @@ export function register(app) {
   standupActions.register(app);
   slipActions.register(app);
   gonogoActions.register(app);
+  launchFeedbackActions.register(app);
 }

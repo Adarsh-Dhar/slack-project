@@ -75,4 +75,35 @@ export const config = {
 
   GO_NO_GO_DAYS_BEFORE: 2,
   STANDUP_HOUR: 9,
+
+  // Posted into the relevant sub-channel (and DM'd to that team's roster,
+  // when `team` is set) once a launch comes within `daysBeforeBoundary` days
+  // of the named phase boundary. Keyed off PHASE_BOUNDARIES_DAYS so reminders
+  // stay in sync if those thresholds move.
+  DEADLINE_REMINDERS: {
+    feature_freeze: {
+      phase: 'build',
+      team: 'engineering',
+      daysBeforeBoundary: 3,
+      message: '🧊 *Feature freeze in {days} day(s)* for {launchName}. Get remaining PRs in for review.',
+    },
+    legal_review: {
+      phase: 'prelaunch',
+      team: 'legal',
+      daysBeforeBoundary: 3,
+      message: '⚖️ *Legal review window closes in {days} day(s)* for {launchName}. Please complete sign-off.',
+    },
+  },
+
+  // Hour-by-hour launch-day runbook, posted by services/runbook.js into the
+  // launch channel (which doubles as the war room) once a launch enters
+  // the `launchday` phase. Times are relative labels, not literal clock times.
+  DEFAULT_RUNBOOK: [
+    { time: 'T-2h', title: 'Final go/no-go confirmation', ownerTeam: 'engineering', instructions: 'Confirm all Go/No-Go items are green; page on-call if any are still red.' },
+    { time: 'T-1h', title: 'Deploy freeze & staging smoke test', ownerTeam: 'engineering', instructions: 'Run the staging smoke suite and confirm rollback plan is ready.' },
+    { time: 'T-0', title: 'Flip the flag / ship it', ownerTeam: 'engineering', instructions: 'Execute the launch deploy. Post a ✅ here once live.' },
+    { time: 'T+15m', title: 'Marketing & comms go out', ownerTeam: 'marketing', instructions: 'Publish announcement post and notify CS of go-live.' },
+    { time: 'T+1h', title: 'Monitor dashboards', ownerTeam: 'engineering', instructions: 'Watch error rates and key metrics; post status updates in this channel every 30 min.' },
+    { time: 'T+4h', title: 'Stability check-in', ownerTeam: 'engineering', instructions: 'Confirm no open incidents before standing down the war room.' },
+  ],
 };

@@ -12,6 +12,7 @@ import { buildStandupBlocks } from '../utils/blocks.js';
 import { getOpenPRs } from './githubPRs.js';
 import { differenceInCalendarDays } from 'date-fns';
 import { config } from '../config.js';
+import { checkDeadlines } from './deadlines.js';
 
 let phaseSyncTask = null;
 let retroCheckTask = null;
@@ -19,6 +20,7 @@ let standupTask = null;
 let slaCheckTask = null;
 let prCheckTask = null;
 let gonogoCheckTask = null;
+let deadlineCheckTask = null;
 
 /**
  * Start the scheduled jobs.
@@ -176,6 +178,19 @@ export function startScheduler(client) {
     }
   }, { timezone: 'UTC' });
 
+  // Run deadline-reminder check daily at 9 AM — mirrors the PR-check
+  // pattern: walk active launches, fire any reminder that just crossed
+  // its configured threshold.
+  deadlineCheckTask = cron.schedule('0 9 * * *', async () => {
+    console.log('[scheduler] Running deadline reminder check...');
+    try {
+      await checkDeadlines(client);
+      console.log('[scheduler] Deadline reminder check complete');
+    } catch (err) {
+      console.error('[scheduler] Deadline reminder check error:', err);
+    }
+  }, { timezone: 'UTC' });
+
   console.log('[scheduler] Scheduled jobs started');
 }
 
@@ -206,6 +221,10 @@ export function stopScheduler() {
   if (gonogoCheckTask) {
     gonogoCheckTask.stop();
     gonogoCheckTask = null;
+  }
+  if (deadlineCheckTask) {
+    deadlineCheckTask.stop();
+    deadlineCheckTask = null;
   }
   console.log('[scheduler] Scheduled jobs stopped');
 }
