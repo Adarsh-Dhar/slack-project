@@ -97,15 +97,14 @@ export function buildSlipAlertBlocks(input) {
   ];
 }
 
-export function buildGoNoGoBlocks(input) {
-  const { launch, items, completedCount, totalCount } = input;
-  const outstanding = items.filter(i => i.status !== 'done');
-  const ratio = totalCount > 0 ? completedCount / totalCount : 0;
-  const statusEmoji = ratio === 1 ? '🟢' : ratio >= 0.8 ? '🟡' : '🔴';
+export function buildGoNoGoCanvasBlocks(input) {
+  const { launch, items, responses } = input;
+  const responseByItem = new Map(responses.map(r => [r.item_id, r]));
 
-  const itemLines = outstanding
-    .map(i => `❌ *${i.title}* — <@${i.owner_id ?? 'unassigned'}> (${i.team})`)
-    .join('\n');
+  const greenCount = responses.filter(r => r.status === 'green').length;
+  const redCount = responses.filter(r => r.status === 'red').length;
+  const pendingCount = items.length - responses.length;
+  const statusEmoji = redCount > 0 ? '�' : pendingCount > 0 ? '🟡' : '🟢';
 
   const blocks = [
     {
@@ -116,52 +115,129 @@ export function buildGoNoGoBlocks(input) {
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `${statusEmoji} *${completedCount} of ${totalCount} items complete.* ${outstanding.length} outstanding.\n\nLaunch date: *${launch.launch_date}*`,
+        text:
+          `${statusEmoji} *${greenCount} green · ${redCount} red · ${pendingCount} pending* ` +
+          `out of ${items.length} readiness items.\n\nLaunch date: *${launch.launch_date}* (T-48h checklist)`,
       },
     },
+    { type: 'divider' },
   ];
 
-  if (outstanding.length > 0) {
+  for (const item of items) {
+    const response = responseByItem.get(item.id);
+    const statusLabel = response
+      ? response.status === 'green'
+        ? '🟢 Green'
+        : '🔴 Red'
+      : '⚪️ Awaiting response';
+    const value = JSON.stringify({ itemId: item.id, launchId: launch.id });
+
     blocks.push({
       type: 'section',
-      text: { type: 'mrkdwn', text: `*Outstanding items:*\n${itemLines}` },
+      block_id: `gonogo_item_${item.id}`,
+      text: {
+        type: 'mrkdwn',
+        text: `*${item.title}*\n${item.team} · <@${item.owner_id ?? 'unassigned'}> · ${statusLabel}`,
+      },
     });
-  } else {
+
     blocks.push({
-      type: 'section',
-      text: { type: 'mrkdwn', text: '✅ All items complete! Ready to launch.' },
+      type: 'actions',
+      block_id: `gonogo_item_actions_${item.id}`,
+      elements: [
+        {
+          type: 'button',
+          text: { type: 'plain_text', text: '🟢 Green', emoji: true },
+          style: 'primary',
+          action_id: 'gonogo_item_green',
+          value,
+        },
+        {
+          type: 'button',
+          text: { type: 'plain_text', text: '🔴 Red', emoji: true },
+          style: 'danger',
+          action_id: 'gonogo_item_red',
+          value,
+        },
+      ],
     });
   }
 
-  blocks.push({
-    type: 'actions',
-    block_id: `gonogo_${launch.id}`,
-    elements: [
-      {
-        type: 'button',
-        text: { type: 'plain_text', text: '✅ Approve Launch', emoji: true },
-        style: 'primary',
-        action_id: 'gonogo_approve',
-        value: String(launch.id),
-        confirm: {
-          title: { type: 'plain_text', text: 'Approve this launch?' },
-          text: {
-            type: 'mrkdwn',
-            text: `This will approve the *${launch.name}* launch for *${launch.launch_date}*.`,
-          },
-          confirm: { type: 'plain_text', text: 'Yes, approve' },
-          deny: { type: 'plain_text', text: 'Not yet' },
-        },
-      },
-      {
-        type: 'button',
-        text: { type: 'plain_text', text: '🛑 Hold Launch', emoji: true },
-        style: 'danger',
-        action_id: 'gonogo_hold',
-        value: String(launch.id),
-      },
-    ],
-  });
-
   return blocks;
+}
+
+export function buildOverridePromptBlocks(input) {
+  const { itemTitle, launchName, itemId, launchId } = input;
+  const value = JSON.stringify({ itemId, launchId });
+
+  return [
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text:
+          `🔴 You marked *${itemTitle}* (${launchName}) as *red* on the Go/No-Go checklist.\n\n` +
+          `If you believe this shouldn't block launch, you can request an override from the PM.`,
+      },
+    },
+    {
+      type: 'actions',
+      block_id: `gonogo_override_${itemId}_${launchId}`,
+      elements: [
+        {
+          type: 'button',
+          text: { type: 'plain_text', text: 'Request Override', emoji: true },
+          style: 'primary',
+          action_id: 'gonogo_request_override',
+          value,
+        },
+      ],
+    },
+  ];
+}
+
+export function buildOverrideApprovalBlocks(input) {
+  const { overrideId, itemTitle, launchName, requestedBy, reason } = input;
+  const value = String(overrideId);
+
+  return [
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text:
+          `🟠 *Override requested* for *${itemTitle}* on *${launchName}*\n\n` +
+          `Requested by <@${requestedBy}>${reason ? `:\n> ${reason}` : ' (no reason given).'}`,
+      },
+    },
+    {
+      type: 'actions',
+      block_id: `gonogo_override_approval_${overrideId}`,
+      elements: [
+        {
+          type: 'button',
+          text: { type: 'plain_text', text: '✅ Approve Override', emoji: true },
+          style: 'primary',
+          action_id: 'gonogo_override_approve',
+          value,
+          confirm: {
+            title: { type: 'plain_text', text: 'Approve this override?' },
+            text: {
+              type: 'mrkdwn',
+              text: `This will mark *${itemTitle}* as cleared for launch despite being red.`,
+            },
+            confirm: { type: 'plain_text', text: 'Yes, approve' },
+            deny: { type: 'plain_text', text: 'Cancel' },
+          },
+        },
+        {
+          type: 'button',
+          text: { type: 'plain_text', text: '❌ Deny', emoji: true },
+          style: 'danger',
+          action_id: 'gonogo_override_deny',
+          value,
+        },
+      ],
+    },
+  ];
 }

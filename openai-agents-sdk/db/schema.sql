@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS launches (
   retro_scheduled_for TEXT,        -- ISO date, set when retro prompt is posted
   retro_completed_at  TEXT,        -- ISO datetime, set when PM submits outcome
   outcome_summary     TEXT,        -- free text the PM fills in
+  gonogo_posted_for   TEXT,        -- ISO date, set when the Go/No-Go canvas is posted (prevents re-posting same day)
+  gonogo_message_ts   TEXT,        -- ts of the canvas message, so we can chat.update it as responses come in
   created_at  TEXT DEFAULT (datetime('now'))
 );
 
@@ -42,4 +44,26 @@ CREATE TABLE IF NOT EXISTS team_rosters (
   usergroup_id TEXT,
   manual_user_ids TEXT,
   UNIQUE(launch_id, team)
+);
+
+CREATE TABLE IF NOT EXISTS gonogo_responses (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  launch_id     INTEGER NOT NULL REFERENCES launches(id),
+  item_id       INTEGER NOT NULL REFERENCES items(id),
+  status        TEXT NOT NULL CHECK (status IN ('green', 'red')),
+  responded_by  TEXT NOT NULL,
+  responded_at  TEXT DEFAULT (datetime('now')),
+  UNIQUE(item_id)
+);
+
+CREATE TABLE IF NOT EXISTS gonogo_overrides (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  launch_id     INTEGER NOT NULL REFERENCES launches(id),
+  item_id       INTEGER NOT NULL REFERENCES items(id),
+  requested_by  TEXT NOT NULL,
+  reason        TEXT,
+  status        TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'denied')),
+  resolved_by   TEXT,
+  resolved_at   TEXT,
+  created_at    TEXT DEFAULT (datetime('now'))
 );

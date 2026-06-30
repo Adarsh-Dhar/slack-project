@@ -212,3 +212,67 @@ export function getStaleItems(hoursThreshold) {
       AND (last_notified_at IS NULL OR last_notified_at <= datetime('now', '-' || ? || ' hours'))
   `).all(hoursThreshold);
 }
+
+// ─── Go/No-Go helpers ────────────────────────────────────────────────────────
+
+export function getLaunchesNeedingGoNoGo(daysBefore) {
+  return db.prepare(`
+    SELECT * FROM launches
+    WHERE status = 'active'
+      AND (gonogo_posted_for IS NULL OR gonogo_posted_for != date('now'))
+      AND date(launch_date, '-' || ? || ' days') <= date('now')
+  `).all(daysBefore);
+}
+
+export function markGoNoGoPosted(launchId, messageTs) {
+  db.prepare(
+    `UPDATE launches SET gonogo_posted_for = date('now'), gonogo_message_ts = ? WHERE id = ?`
+  ).run(messageTs, launchId);
+}
+
+export function updateGoNoGoMessageTs(launchId, messageTs) {
+  db.prepare(`UPDATE launches SET gonogo_message_ts = ? WHERE id = ?`).run(messageTs, launchId);
+}
+
+export function upsertGoNoGoResponse(itemId, launchId, status, respondedBy) {
+  db.prepare(
+    `INSERT INTO gonogo_responses (item_id, launch_id, status, responded_by, responded_at)
+     VALUES (?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(item_id) DO UPDATE SET
+       status = excluded.status,
+       responded_by = excluded.responded_by,
+       responded_at = excluded.responded_at`
+  ).run(itemId, launchId, status, respondedBy);
+}
+
+export function getGoNoGoResponses(launchId) {
+  return db.prepare('SELECT * FROM gonogo_responses WHERE launch_id = ?').all(launchId);
+}
+
+export function getGoNoGoResponseForItem(itemId) {
+  return db.prepare('SELECT * FROM gonogo_responses WHERE item_id = ?').get(itemId);
+}
+
+export function createOverrideRequest(input) {
+  const stmt = db.prepare(
+    `INSERT INTO gonogo_overrides (launch_id, item_id, requested_by, reason)
+     VALUES (@launchId, @itemId, @requestedBy, @reason)`
+  );
+  const result = stmt.run({
+    launchId: input.launchId,
+    itemId: input.itemId,
+    requestedBy: input.requestedBy,
+    reason: input.reason ?? null,
+  });
+  return result.lastInsertRowid;
+}
+
+export function getOverrideRequest(id) {
+  return db.prepare('SELECT * FROM gonogo_overrides WHERE id = ?').get(id);
+}
+
+export function resolveOverrideRequest(id, status, resolvedBy) {
+  db.prepare(
+    `UPDATE gonogo_overrides SET status = ?, resolved_by = ?, resolved_at = datetime('now') WHERE id = ?`
+  ).run(status, resolvedBy, id);
+}

@@ -7,6 +7,7 @@ import cron from 'node-cron';
 import * as db from '../db/index.js';
 import { checkAndSyncPhase } from './phaseManager.js';
 import { postRetroPrompt } from './retro.js';
+import { postGoNoGoCanvas } from './gonogo.js';
 import { buildStandupBlocks } from '../utils/blocks.js';
 import { getOpenPRs } from './githubPRs.js';
 import { differenceInCalendarDays } from 'date-fns';
@@ -17,6 +18,7 @@ let retroCheckTask = null;
 let standupTask = null;
 let slaCheckTask = null;
 let prCheckTask = null;
+let gonogoCheckTask = null;
 
 /**
  * Start the scheduled jobs.
@@ -159,6 +161,21 @@ export function startScheduler(client) {
     }
   }, { timezone: 'UTC' });
 
+  // Run Go/No-Go canvas check daily at 9 AM — posts the checklist canvas
+  // once a launch crosses the T-48h (config.GO_NO_GO_DAYS_BEFORE) boundary.
+  gonogoCheckTask = cron.schedule('0 9 * * *', async () => {
+    console.log('[scheduler] Running Go/No-Go canvas check...');
+    try {
+      const dueLaunches = db.getLaunchesNeedingGoNoGo(config.GO_NO_GO_DAYS_BEFORE);
+      for (const launch of dueLaunches) {
+        await postGoNoGoCanvas(client, launch);
+      }
+      console.log(`[scheduler] Go/No-Go canvas posted for ${dueLaunches.length} launches`);
+    } catch (err) {
+      console.error('[scheduler] Go/No-Go canvas error:', err);
+    }
+  }, { timezone: 'UTC' });
+
   console.log('[scheduler] Scheduled jobs started');
 }
 
@@ -185,6 +202,10 @@ export function stopScheduler() {
   if (prCheckTask) {
     prCheckTask.stop();
     prCheckTask = null;
+  }
+  if (gonogoCheckTask) {
+    gonogoCheckTask.stop();
+    gonogoCheckTask = null;
   }
   console.log('[scheduler] Scheduled jobs stopped');
 }
