@@ -115,8 +115,8 @@ export function startScheduler(client) {
   // Run PR check daily at 9 AM
   prCheckTask = cron.schedule('0 9 * * *', async () => {
     console.log('[scheduler] Running PR check...');
+    const activeLaunches = db.getAllActiveLaunches();
     try {
-      const activeLaunches = db.getAllActiveLaunches();
       for (const launch of activeLaunches) {
         if (!launch.github_repo) continue;
         const daysUntil = differenceInCalendarDays(new Date(launch.launch_date), new Date());
