@@ -6,7 +6,7 @@ import { config } from '../config';
 import type {
   LaunchRow, ItemRow, StakeholderChannelRow, TeamRosterRow,
   CreateLaunchInput, CreateItemInput, AddStakeholderChannelInput,
-  ItemStatus, LaunchStatus, LaunchPhase, TeamName,
+  ItemStatus, LaunchStatus, LaunchPhase, TeamName, GoNoGoResponse, GoNoGoSummary,
 } from '../types';
 
 const db = new Database(config.DB_PATH);
@@ -33,6 +33,15 @@ ensureColumn('launches', 'last_legal_escalated_at', 'last_legal_escalated_at TEX
 ensureColumn('items', 'last_dm_sent_at', 'last_dm_sent_at TEXT');
 ensureColumn('items', 'last_dm_acked_at', 'last_dm_acked_at TEXT');
 ensureColumn('items', 'last_escalated_at', 'last_escalated_at TEXT');
+ensureColumn('launches', 'gonogo_message_ts', 'gonogo_message_ts TEXT');
+ensureColumn('launches', 'gonogo_posted_at', 'gonogo_posted_at TEXT');
+ensureColumn('items', 'gonogo_response', 'gonogo_response TEXT');
+ensureColumn('items', 'gonogo_note', 'gonogo_note TEXT');
+ensureColumn('items', 'gonogo_responded_at', 'gonogo_responded_at TEXT');
+ensureColumn('items', 'gonogo_override_requested', 'gonogo_override_requested INTEGER DEFAULT 0');
+ensureColumn('items', 'gonogo_overridden_by', 'gonogo_overridden_by TEXT');
+ensureColumn('items', 'gonogo_overridden_at', 'gonogo_overridden_at TEXT');
+ensureColumn('items', 'gonogo_last_nudged_at', 'gonogo_last_nudged_at TEXT');
 
 // ─── Launch helpers ──────────────────────────────────────────────────────────
 
@@ -302,6 +311,83 @@ export function getLaunchesNeedingLegalEscalation(): LaunchRow[] {
        AND date(launch_date, '-2 days') <= date('now')
        AND date(launch_date) >= date('now')
        AND (last_legal_escalated_at IS NULL OR datetime(last_legal_escalated_at, '+24 hours') <= datetime('now'))`
+    )
+    .all();
+}
+
+// ─── Go/No-Go checklist helpers ──────────────────────────────────────────────
+
+/** Launches within the T-48h window that haven't had the checklist posted yet. */
+export function getLaunchesNeedingGoNoGoPost(): LaunchRow[] {
+  return db
+    .prepare<[], LaunchRow>(
+      `SELECT * FROM launches
+       WHERE status IN ('active', 'approved')
+       AND gonogo_posted_at IS NULL
+       AND date(launch_date, '-${config.GO_NO_GO_DAYS_BEFORE} days') <= date('now')
+       AND date(launch_date) >= date('now')`
+    )
+    .all();
+}
+
+export function markGoNoGoPosted(launchId: number, messageTs: string): void {
+  db.prepare(
+    `UPDATE launches SET gonogo_posted_at = datetime('now'), gonogo_message_ts = ? WHERE id = ?`
+  ).run(messageTs, launchId);
+}
+
+export function updateGoNoGoMessageTs(launchId: number, messageTs: string): void {
+  db.prepare(`UPDATE launches SET gonogo_message_ts = ? WHERE id = ?`).run(messageTs, launchId);
+}
+
+export function setGoNoGoResponse(itemId: number, response: GoNoGoResponse, note?: string | null): void {
+  db.prepare(
+    `UPDATE items SET gonogo_response = ?, gonogo_note = ?, gonogo_responded_at = datetime('now') WHERE id = ?`
+  ).run(response, note ?? null, itemId);
+}
+
+export function getGoNoGoSummary(launchId: number): GoNoGoSummary {
+  const items = getItemsByLaunch(launchId).filter(i => i.owner_id !== null);
+  const green = items.filter(i => i.gonogo_response === 'green').length;
+  const red = items.filter(i => i.gonogo_response === 'red').length;
+  const overridden = items.filter(i => i.gonogo_response === 'overridden').length;
+  const noResponse = items.length - green - red - overridden;
+  const redItems = items.filter(i => i.gonogo_response === 'red');
+
+  return { green, red, overridden, noResponse, total: items.length, redItems };
+}
+
+export function setOverrideRequested(itemId: number): void {
+  db.prepare(`UPDATE items SET gonogo_override_requested = 1 WHERE id = ?`).run(itemId);
+}
+
+export function approveOverride(itemId: number, pmUserId: string): void {
+  db.prepare(
+    `UPDATE items
+     SET gonogo_response = 'overridden', gonogo_overridden_by = ?, gonogo_overridden_at = datetime('now'), gonogo_override_requested = 0
+     WHERE id = ?`
+  ).run(pmUserId, itemId);
+}
+
+export function markGoNoGoNudged(itemId: number): void {
+  db.prepare(`UPDATE items SET gonogo_last_nudged_at = datetime('now') WHERE id = ?`).run(itemId);
+}
+
+/**
+ * Items still red (not overridden), with an owner, on launches where the
+ * checklist has been posted, that haven't been nudged in the configured
+ * interval. Used by the periodic reminder cron.
+ */
+export function getItemsNeedingGoNoGoNudge(): ItemRow[] {
+  return db
+    .prepare<[], ItemRow>(
+      `SELECT items.* FROM items
+       JOIN launches ON launches.id = items.launch_id
+       WHERE items.gonogo_response = 'red'
+       AND items.owner_id IS NOT NULL
+       AND launches.gonogo_posted_at IS NOT NULL
+       AND launches.status IN ('active', 'approved')
+       AND (items.gonogo_last_nudged_at IS NULL OR datetime(items.gonogo_last_nudged_at, '+${config.GONOGO_NUDGE_INTERVAL_HOURS} hours') <= datetime('now'))`
     )
     .all();
 }

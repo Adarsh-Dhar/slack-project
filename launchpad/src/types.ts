@@ -5,6 +5,7 @@
 export type LaunchStatus = 'active' | 'approved' | 'launched' | 'retro_pending' | 'archived' | 'cancelled';
 export type LaunchPhase = 'discovery' | 'build' | 'prelaunch' | 'gonogo' | 'launchday';
 export type ItemStatus = 'not_started' | 'in_progress' | 'done' | 'blocked';
+export type GoNoGoResponse = 'green' | 'red' | 'overridden';
 export type TeamName = 'engineering' | 'marketing' | 'docs' | 'legal' | 'sales' | 'other';
 
 // ─── Launch tier ─────────────────────────────────────────────────────────────
@@ -35,6 +36,8 @@ export interface LaunchRow {
   legal_signed_off_at: string | null;
   last_pr_alert_at: string | null;
   last_legal_escalated_at: string | null;
+  gonogo_message_ts: string | null;
+  gonogo_posted_at: string | null;
   created_at: string;
 }
 
@@ -49,6 +52,13 @@ export interface ItemRow {
   last_dm_sent_at: string | null;
   last_dm_acked_at: string | null;
   last_escalated_at: string | null;
+  gonogo_response: GoNoGoResponse | null;
+  gonogo_note: string | null;
+  gonogo_responded_at: string | null;
+  gonogo_override_requested: 0 | 1;
+  gonogo_overridden_by: string | null;
+  gonogo_overridden_at: string | null;
+  gonogo_last_nudged_at: string | null;
   created_at: string;
 }
 
@@ -144,11 +154,19 @@ export interface SlipAlertBlocksInput {
   launchId: number;
 }
 
-export interface GoNoGoBlocksInput {
+export interface GoNoGoSummary {
+  green: number;
+  red: number;
+  overridden: number;
+  noResponse: number;
+  total: number;
+  redItems: ItemRow[];
+}
+
+export interface GoNoGoChecklistBlocksInput {
   launch: LaunchRow;
   items: ItemRow[];
-  completedCount: number;
-  totalCount: number;
+  summary: GoNoGoSummary;
 }
 
 // ─── Retro / outcome ──────────────────────────────────────────────────────────

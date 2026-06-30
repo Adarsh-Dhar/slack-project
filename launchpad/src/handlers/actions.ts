@@ -4,9 +4,15 @@ import * as db from '../db';
 import { updateLaunchCanvas } from '../services/canvasBuilder';
 import { executeLaunch } from '../services/launchDay';
 import { buildOutcomeModal, finalizeRetroAndArchive } from '../services/retro';
+import { refreshGoNoGoChecklist } from '../services/goNoGoCanvas';
 import type { OutcomeFormInput } from '../types';
 
 interface StandupActionValue {
+  itemId: number;
+  launchId: number;
+}
+
+interface GoNoGoItemActionValue {
   itemId: number;
   launchId: number;
 }
@@ -236,6 +242,156 @@ export function registerActions(app: App): void {
     await client.chat.postMessage({
       channel: launch.channel_id,
       text: `✅ *Legal sign-off complete* for *${launch.name}*, confirmed by <@${body.user.id}>.`,
+    });
+  });
+
+  // ─── Go/No-Go: item marked green ─────────────────────────────────────────
+  app.action('gonogo_item_green', async ({ ack, body, client, action }) => {
+    await ack();
+    if (action.type !== 'button') return;
+
+    const value = (action as ButtonAction).value ?? '{}';
+    const { itemId, launchId } = JSON.parse(value) as GoNoGoItemActionValue;
+
+    db.setGoNoGoResponse(itemId, 'green');
+    await refreshGoNoGoChecklist(client, launchId);
+  });
+
+  // ─── Go/No-Go: item marked red → ask for a reason ────────────────────────
+  app.action('gonogo_item_red', async ({ ack, body, client, action }) => {
+    await ack();
+    if (action.type !== 'button') return;
+
+    const value = (action as ButtonAction).value ?? '{}';
+    const { itemId, launchId } = JSON.parse(value) as GoNoGoItemActionValue;
+
+    const b = body as BlockActionBody;
+    await client.views.open({
+      trigger_id: b.trigger_id,
+      view: {
+        type: 'modal',
+        callback_id: `gonogo_red_modal_${itemId}_${launchId}`,
+        title: { type: 'plain_text', text: 'Mark Red' },
+        submit: { type: 'plain_text', text: 'Submit' },
+        blocks: [
+          {
+            type: 'input',
+            block_id: 'gonogo_red_reason',
+            label: { type: 'plain_text', text: "What's blocking go on this?" },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'reason_text',
+              multiline: true,
+              placeholder: { type: 'plain_text', text: 'e.g. load testing failed, waiting on a fix' },
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  // ─── Go/No-Go: red reason modal submitted ────────────────────────────────
+  app.view(/^gonogo_red_modal_/, async ({ ack, body, view, client }) => {
+    await ack();
+
+    // callback_id is "gonogo_red_modal_{itemId}_{launchId}"
+    const parts = view.callback_id.split('_');
+    const launchId = Number(parts[parts.length - 1]);
+    const itemId = Number(parts[parts.length - 2]);
+
+    const reason =
+      view.state.values['gonogo_red_reason']?.['reason_text']?.value ?? '(no reason given)';
+
+    db.setGoNoGoResponse(itemId, 'red', reason);
+    await refreshGoNoGoChecklist(client, launchId);
+
+    const launch = db.getLaunchById(launchId);
+    if (!launch) return;
+
+    // Immediate confirmation DM to the person who marked it red.
+    await client.chat.postMessage({
+      channel: body.user.id,
+      text: `🔴 You marked an item red for *${launch.name}*: _${reason}_. The team has been notified.`,
+    });
+  });
+
+  // ─── Go/No-Go: owner requests a PM override on a red item ───────────────
+  app.action('gonogo_request_override', async ({ ack, body, client, action }) => {
+    await ack();
+    if (action.type !== 'button') return;
+
+    const value = (action as ButtonAction).value ?? '{}';
+    const { itemId, launchId } = JSON.parse(value) as GoNoGoItemActionValue;
+
+    const launch = db.getLaunchById(launchId);
+    const items = db.getItemsByLaunch(launchId);
+    const item = items.find(i => i.id === itemId);
+    if (!launch || !item) return;
+
+    db.setOverrideRequested(itemId);
+    await refreshGoNoGoChecklist(client, launchId);
+
+    await client.chat.postMessage({
+      channel: launch.pm_user_id,
+      text: `🆘 *Override requested* for *${item.title}* on *${launch.name}*, flagged red by <@${item.owner_id}>: _${item.gonogo_note ?? 'no reason given'}_.`,
+      blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text:
+              `🆘 *Override requested* for *${item.title}* on *${launch.name}*, ` +
+              `flagged red by <@${item.owner_id}>: _${item.gonogo_note ?? 'no reason given'}_.`,
+          },
+        },
+        {
+          type: 'actions',
+          block_id: `gonogo_override_approve_${itemId}`,
+          elements: [
+            {
+              type: 'button',
+              text: { type: 'plain_text', text: '✅ Approve Override', emoji: true },
+              style: 'primary',
+              action_id: 'gonogo_approve_override',
+              value: JSON.stringify({ itemId, launchId }),
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  // ─── Go/No-Go: PM approves the override ──────────────────────────────────
+  app.action('gonogo_approve_override', async ({ ack, body, client, action }) => {
+    await ack();
+    if (action.type !== 'button') return;
+
+    const value = (action as ButtonAction).value ?? '{}';
+    const { itemId, launchId } = JSON.parse(value) as GoNoGoItemActionValue;
+
+    const launch = db.getLaunchById(launchId);
+    const items = db.getItemsByLaunch(launchId);
+    const item = items.find(i => i.id === itemId);
+    if (!launch || !item) return;
+
+    db.approveOverride(itemId, body.user.id);
+    await refreshGoNoGoChecklist(client, launchId);
+
+    const b = body as BlockActionBody;
+    const channelId = b.channel?.id;
+    const ts = b.message?.ts;
+    if (channelId && ts) {
+      await client.chat.update({
+        channel: channelId,
+        ts,
+        text: `✅ Override approved by <@${body.user.id}>.`,
+        blocks: [],
+      });
+    }
+
+    await client.chat.postMessage({
+      channel: launch.channel_id,
+      text: `🟠 <@${body.user.id}> approved an override for *${item.title}* (originally flagged red by <@${item.owner_id}>).`,
     });
   });
 

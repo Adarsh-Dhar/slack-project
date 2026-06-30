@@ -5,7 +5,7 @@ import { differenceInCalendarDays } from 'date-fns';
 import * as db from '../db';
 import { config } from '../config';
 import { buildStandupBlocks } from '../utils/blocks';
-import { runGoNoGo } from '../services/goNoGo';
+import { postGoNoGoChecklist } from '../services/goNoGoCanvas';
 import { executeLaunch } from '../services/launchDay';
 import { postRetroPrompt } from '../services/retro';
 import { checkAndSyncPhase } from '../services/phaseManager';
@@ -59,9 +59,52 @@ export function registerScheduledJobs(app: App): void {
     }
   });
 
-  // ─── Go/No-Go + launch day check: 9:05am weekdays ───────────────────────
+  // ─── Go/No-Go checklist post: hourly, throttled via gonogo_posted_at ────
+  // Posts once per launch as soon as it enters the T-48h window (more
+  // resilient than a single daily cron tick — survives a bot restart).
+  cron.schedule('10 * * * *', async () => {
+    const launches = db.getLaunchesNeedingGoNoGoPost();
+    if (launches.length === 0) return;
+
+    console.log(`[GoNoGoChecklist] Posting checklist for ${launches.length} launch(es)...`);
+
+    for (const launch of launches) {
+      await postGoNoGoChecklist(client, launch.id).catch((err: Error) =>
+        console.error(`[GoNoGoChecklist] Failed for launch ${launch.id}:`, err.message)
+      );
+    }
+  });
+
+  // ─── Go/No-Go red-item nudge: hourly, throttled per item ────────────────
+  cron.schedule('40 * * * *', async () => {
+    const overdueItems = db.getItemsNeedingGoNoGoNudge();
+    if (overdueItems.length === 0) return;
+
+    console.log(`[GoNoGoNudge] Nudging ${overdueItems.length} red item(s)...`);
+
+    for (const item of overdueItems) {
+      if (!item.owner_id) continue;
+      const launch = db.getLaunchById(item.launch_id);
+      if (!launch) continue;
+
+      await client.chat
+        .postMessage({
+          channel: item.owner_id,
+          text:
+            `🔴 *Still red:* *${item.title}* (${launch.name}) is blocking Go/No-Go.` +
+            (item.gonogo_note ? ` Reason given: _${item.gonogo_note}_.` : '') +
+            ` Reply in <#${launch.channel_id}> once resolved, or request an override.`,
+        })
+        .then(() => db.markGoNoGoNudged(item.id))
+        .catch((err: Error) =>
+          console.error(`[GoNoGoNudge] DM failed for ${item.owner_id}:`, err.message)
+        );
+    }
+  });
+
+  // ─── Launch day check: 9:05am weekdays ───────────────────────────────────
   cron.schedule(`5 ${config.STANDUP_HOUR} * * 1-5`, async () => {
-    console.log('[GoNoGo] Checking for upcoming launches...');
+    console.log('[LaunchDay] Checking for launches executing today...');
 
     const activeLaunches = db.getAllActiveLaunches();
 
@@ -70,13 +113,6 @@ export function registerScheduledJobs(app: App): void {
         new Date(launch.launch_date),
         new Date()
       );
-
-      if (daysUntil === config.GO_NO_GO_DAYS_BEFORE) {
-        console.log(`[GoNoGo] Triggering for launch ${launch.id}: ${launch.name}`);
-        await runGoNoGo(client, launch.id).catch((err: Error) =>
-          console.error(`[GoNoGo] Failed for launch ${launch.id}:`, err.message)
-        );
-      }
 
       if (daysUntil === 0 && launch.status === 'approved') {
         console.log(`[LaunchDay] Executing launch ${launch.id}: ${launch.name}`);

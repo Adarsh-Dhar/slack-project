@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS launches (
   legal_signed_off_at     TEXT,    -- ISO datetime, set when legal approves
   last_pr_alert_at        TEXT,    -- ISO datetime, throttles open-PR alerts
   last_legal_escalated_at TEXT,    -- ISO datetime, throttles legal SLA nudges
+  gonogo_message_ts       TEXT,    -- Slack message ts of the posted checklist, so we can chat.update it
+  gonogo_posted_at        TEXT,    -- ISO datetime, set once the T-48h checklist is posted (throttle)
   created_at  TEXT DEFAULT (datetime('now'))
 );
 
@@ -29,6 +31,13 @@ CREATE TABLE IF NOT EXISTS items (
   last_dm_sent_at    TEXT,  -- ISO datetime, set whenever a standup DM goes out
   last_dm_acked_at   TEXT,  -- ISO datetime, set when the owner clicks any standup button
   last_escalated_at  TEXT,  -- ISO datetime, throttles 24h no-reply nudges
+  gonogo_response            TEXT,    -- 'green' | 'red' | 'overridden' | NULL
+  gonogo_note                TEXT,    -- reason given when marked red
+  gonogo_responded_at        TEXT,    -- ISO datetime of the green/red click
+  gonogo_override_requested  INTEGER DEFAULT 0,
+  gonogo_overridden_by       TEXT,    -- Slack user id of the PM who approved the override
+  gonogo_overridden_at       TEXT,
+  gonogo_last_nudged_at      TEXT,    -- ISO datetime, throttles red-item reminder DMs
   created_at  TEXT DEFAULT (datetime('now'))
 );
 
