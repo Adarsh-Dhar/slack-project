@@ -4,9 +4,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { config } from '../config';
 import type {
-  LaunchRow, ItemRow, StakeholderChannelRow,
+  LaunchRow, ItemRow, StakeholderChannelRow, TeamRosterRow,
   CreateLaunchInput, CreateItemInput, AddStakeholderChannelInput,
-  ItemStatus, LaunchStatus,
+  ItemStatus, LaunchStatus, LaunchPhase, TeamName,
 } from '../types';
 
 const db = new Database(config.DB_PATH);
@@ -51,6 +51,39 @@ export function updateLaunchCanvas(launchId: number, canvasId: string): void {
 
 export function updateLaunchStatus(launchId: number, status: LaunchStatus): void {
   db.prepare('UPDATE launches SET status = ? WHERE id = ?').run(status, launchId);
+}
+
+// ─── Retro helpers ────────────────────────────────────────────────────────────
+
+export function markRetroScheduled(launchId: number, scheduledFor: string): void {
+  db.prepare(
+    `UPDATE launches SET status = 'retro_pending', retro_scheduled_for = ? WHERE id = ?`
+  ).run(scheduledFor, launchId);
+}
+
+export function saveOutcomeAndArchive(
+  launchId: number,
+  outcomeSummary: string
+): void {
+  db.prepare(
+    `UPDATE launches
+     SET status = 'archived', outcome_summary = ?, retro_completed_at = datetime('now')
+     WHERE id = ?`
+  ).run(outcomeSummary, launchId);
+}
+
+/**
+ * Launches that are 'launched' status and whose launch_date was
+ * exactly N days ago (default 7) — these need a retro prompt.
+ */
+export function getLaunchesNeedingRetro(daysAfterLaunch: number): LaunchRow[] {
+  return db
+    .prepare<number, LaunchRow>(
+      `SELECT * FROM launches
+       WHERE status = 'launched'
+       AND date(launch_date, '+' || ? || ' days') <= date('now')`
+    )
+    .all(daysAfterLaunch);
 }
 
 // ─── Item helpers ────────────────────────────────────────────────────────────
@@ -116,4 +149,39 @@ export function getLaunchByStakeholderChannel(channelId: string): LaunchRow | un
     )
     .get(channelId);
   return row ? getLaunchById(row.launch_id) : undefined;
+}
+
+// ─── Phase & roster helpers ─────────────────────────────────────────────────────
+
+export function updateLaunchPhase(launchId: number, phase: LaunchPhase): void {
+  db.prepare(`UPDATE launches SET current_phase = ? WHERE id = ?`).run(phase, launchId);
+}
+
+export function setTeamRoster(
+  launchId: number,
+  team: TeamName,
+  usergroupId: string | null,
+  manualUserIds: string[]
+): void {
+  db.prepare(
+    `INSERT INTO team_rosters (launch_id, team, usergroup_id, manual_user_ids)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(launch_id, team) DO UPDATE SET
+       usergroup_id = excluded.usergroup_id,
+       manual_user_ids = excluded.manual_user_ids`
+  ).run(launchId, team, usergroupId, JSON.stringify(manualUserIds));
+}
+
+export function getTeamRoster(launchId: number, team: TeamName): TeamRosterRow | undefined {
+  return db
+    .prepare<[number, string], TeamRosterRow>(
+      `SELECT * FROM team_rosters WHERE launch_id = ? AND team = ?`
+    )
+    .get(launchId, team);
+}
+
+export function getAllRostersForLaunch(launchId: number): TeamRosterRow[] {
+  return db
+    .prepare<number, TeamRosterRow>(`SELECT * FROM team_rosters WHERE launch_id = ?`)
+    .all(launchId);
 }

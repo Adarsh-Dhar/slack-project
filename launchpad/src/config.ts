@@ -1,6 +1,6 @@
 // src/config.ts
 import * as dotenv from 'dotenv';
-import type { LaunchTier, SubChannel, TeamName } from './types';
+import type { LaunchTier, SubChannel, TeamName, LaunchPhase } from './types';
 dotenv.config({ path: '.env' });
 dotenv.config({ path: '.env.local', override: true }); // .env.local takes precedence
 
@@ -59,4 +59,29 @@ export const config = {
       // Minor launches only get the main #launch-x channel, no sub-channels
     ] as SubChannel[],
   } as const satisfies Record<LaunchTier, SubChannel[]>,
+
+  PHASE_TEAM_MAP: {
+    discovery:  ['engineering'],
+    build:      ['engineering', 'marketing', 'sales'],
+    prelaunch:  ['engineering', 'marketing', 'sales', 'legal', 'docs'],
+    gonogo:     ['engineering', 'marketing', 'sales', 'legal', 'docs'],
+    launchday:  ['engineering', 'marketing'],
+  } as const satisfies Record<LaunchPhase, TeamName[]>,
+
+  PHASE_BOUNDARIES_DAYS: {
+    discovery: 56,
+    build: 42,
+    prelaunch: 14,
+    gonogo: 2,
+    launchday: 0,
+  } as const,
+
+  TEAM_USERGROUP_MAP: {
+    engineering: process.env['USERGROUP_ENGINEERING'] ?? '',
+    marketing:   process.env['USERGROUP_MARKETING'] ?? '',
+    docs:        process.env['USERGROUP_DOCS'] ?? '',
+    legal:       process.env['USERGROUP_LEGAL'] ?? '',
+    sales:       process.env['USERGROUP_SALES'] ?? '',
+    other:       '',
+  } as Record<TeamName, string>,
 } as const;

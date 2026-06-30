@@ -2,7 +2,8 @@
 
 // ─── Database row shapes ────────────────────────────────────────────────────
 
-export type LaunchStatus = 'active' | 'approved' | 'launched' | 'cancelled';
+export type LaunchStatus = 'active' | 'approved' | 'launched' | 'retro_pending' | 'archived' | 'cancelled';
+export type LaunchPhase = 'discovery' | 'build' | 'prelaunch' | 'gonogo' | 'launchday';
 export type ItemStatus = 'not_started' | 'in_progress' | 'done' | 'blocked';
 export type TeamName = 'engineering' | 'marketing' | 'docs' | 'legal' | 'sales' | 'other';
 
@@ -25,6 +26,10 @@ export interface LaunchRow {
   tier: LaunchTier;           // NEW
   canvas_id: string | null;
   status: LaunchStatus;
+  retro_scheduled_for: string | null;
+  retro_completed_at: string | null;
+  outcome_summary: string | null;
+  current_phase: LaunchPhase;
   created_at: string;
 }
 
@@ -44,6 +49,14 @@ export interface StakeholderChannelRow {
   launch_id: number;
   channel_id: string;
   team: TeamName;
+}
+
+export interface TeamRosterRow {
+  id: number;
+  launch_id: number;
+  team: TeamName;
+  usergroup_id: string | null;
+  manual_user_ids: string | null;
 }
 
 // ─── Service input shapes ────────────────────────────────────────────────────
@@ -125,4 +138,14 @@ export interface GoNoGoBlocksInput {
   items: ItemRow[];
   completedCount: number;
   totalCount: number;
+}
+
+// ─── Retro / outcome ──────────────────────────────────────────────────────────
+
+export interface OutcomeFormInput {
+  launchId: number;
+  whatWentWell: string;
+  whatDidnt: string;
+  adoptionNotes: string;
+  submittedBy: string;
 }

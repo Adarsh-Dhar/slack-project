@@ -7,6 +7,8 @@ import { config } from '../config';
 import { buildStandupBlocks } from '../utils/blocks';
 import { runGoNoGo } from '../services/goNoGo';
 import { executeLaunch } from '../services/launchDay';
+import { postRetroPrompt } from '../services/retro';
+import { checkAndSyncPhase } from '../services/phaseManager';
 import type { ItemRow } from '../types';
 
 export function registerScheduledJobs(app: App): void {
@@ -80,6 +82,27 @@ export function registerScheduledJobs(app: App): void {
           console.error(`[LaunchDay] Failed for launch ${launch.id}:`, err.message)
         );
       }
+    }
+  });
+
+  // ─── Retro check: daily at 10am, find launches 7+ days post-launch ──────
+  cron.schedule('0 10 * * *', async () => {
+    console.log('[Retro] Checking for launches needing a retro...');
+
+    const launchesNeedingRetro = db.getLaunchesNeedingRetro(7);
+
+    for (const launch of launchesNeedingRetro) {
+      await postRetroPrompt(client, launch);
+      console.log(`[Retro] Posted retro prompt for launch ${launch.id} (${launch.name})`);
+    }
+  });
+
+  // ─── Phase check: daily at 8am, sync phase transitions for active launches ───
+  cron.schedule('0 8 * * *', async () => {
+    console.log('[Phase] Checking phase transitions for active launches...');
+    const activeLaunches = db.getAllActiveLaunches();
+    for (const launch of activeLaunches) {
+      await checkAndSyncPhase(client, launch);
     }
   });
 }

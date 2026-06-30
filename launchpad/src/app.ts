@@ -2,6 +2,8 @@
 import { App } from '@slack/bolt';
 import { config } from './config';
 import { registerLaunchCommand } from './handlers/launch';
+import { registerRetroCommand } from './handlers/retroCommand';
+import { registerPhaseCommand } from './handlers/phaseCommand';
 import { registerAgentCommand } from './handlers/agent';
 import { registerActions } from './handlers/actions';
 import { registerEvents } from './handlers/events';
@@ -14,6 +16,8 @@ const app = new App({
   appToken: config.SLACK_APP_TOKEN,
 });
 
+registerRetroCommand(app);
+registerPhaseCommand(app);
 registerLaunchCommand(app);
 registerAgentCommand(app);
 registerActions(app);

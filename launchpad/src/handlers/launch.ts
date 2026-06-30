@@ -2,7 +2,9 @@
 import type { App } from '@slack/bolt';
 import { addDays, format } from 'date-fns';
 import * as db from '../db';
+import { config } from '../config';
 import { parseLaunchCommand } from '../utils/parseCommand';
+import { resolvePlainMentions } from '../utils/resolveMentions';
 import { scanAllStakeholderChannels } from '../services/channelScanner';
 import { createLaunchCanvas, DEFAULT_CHECKLIST } from '../services/canvasBuilder';
 import { notifyItemOwner, postOwnershipSummary } from '../services/ownership';
@@ -20,8 +22,15 @@ export function registerLaunchCommand(app: App): void {
       const { featureName, launchDate, tier, mentionedUsers, mentionedChannels } =
         parseLaunchCommand(command.text);
 
+      console.log('[DEBUG] raw command.text:', JSON.stringify(command.text));
+      console.log('[DEBUG] mentionedUsers parsed:', mentionedUsers);
+
+      // NEW: catch any plain @username that wasn't auto-converted to <@U...>
+      const fallbackUserIds = await resolvePlainMentions(client, command.text, mentionedUsers);
+      const allMentionedUsers = [...mentionedUsers, ...fallbackUserIds];
+
       // 2–4. Create main + sub-channels based on tier
-      const allUsers = [...new Set([pmUserId, ...mentionedUsers])];
+      const allUsers = [...new Set([pmUserId, ...allMentionedUsers])];
 
       const { mainChannelId, subChannels } = await createLaunchChannels(
         client,
@@ -49,6 +58,13 @@ export function registerLaunchCommand(app: App): void {
       // 6b. Now register sub-channels with the real launchId
       for (const { channelId, sub } of subChannels) {
         db.addStakeholderChannel({ launchId, channelId, team: sub.team });
+      }
+
+      // 6c. Register team rosters — prefer User Group, fallback to mentioned users
+      const teamsInTier = [...new Set(subChannels.map(s => s.sub.team))];
+      for (const team of teamsInTier) {
+        const usergroupId = config.TEAM_USERGROUP_MAP[team] || null;
+        db.setTeamRoster(launchId, team, usergroupId, allMentionedUsers);
       }
 
       // 7. Register stakeholder channels
@@ -83,8 +99,8 @@ export function registerLaunchCommand(app: App): void {
 
       const teamToUser: Partial<Record<TeamName, string>> = {};
       TEAMS.forEach((team, i) => {
-        if (mentionedUsers.length > 0) {
-          teamToUser[team] = mentionedUsers[i % mentionedUsers.length];
+        if (allMentionedUsers.length > 0) {
+          teamToUser[team] = allMentionedUsers[i % allMentionedUsers.length];
         }
       });
 

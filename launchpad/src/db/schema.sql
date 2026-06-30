@@ -7,6 +7,9 @@ CREATE TABLE IF NOT EXISTS launches (
   tier        TEXT DEFAULT 'moderate',
   canvas_id   TEXT,
   status      TEXT DEFAULT 'active',
+  retro_scheduled_for TEXT,        -- ISO date, set when retro prompt is posted
+  retro_completed_at  TEXT,        -- ISO datetime, set when PM submits outcome
+  outcome_summary     TEXT,        -- free text the PM fills in
   created_at  TEXT DEFAULT (datetime('now'))
 );
 
@@ -26,4 +29,13 @@ CREATE TABLE IF NOT EXISTS stakeholder_channels (
   launch_id   INTEGER NOT NULL REFERENCES launches(id),
   channel_id  TEXT NOT NULL,
   team        TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS team_rosters (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  launch_id   INTEGER NOT NULL REFERENCES launches(id),
+  team        TEXT NOT NULL,
+  usergroup_id TEXT,
+  manual_user_ids TEXT,
+  UNIQUE(launch_id, team)
 );

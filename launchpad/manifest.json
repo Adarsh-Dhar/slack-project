@@ -17,6 +17,17 @@
         "should_escape": false
       },
       {
+        "command": "/retro",
+        "description": "Trigger the post-launch retro early",
+        "usage_hint": "(run inside a launch channel)",
+        "should_escape": false
+      },
+      {
+        "command": "/launch-phase",
+        "description": "Manually force a phase transition",
+        "usage_hint": "discovery | build | prelaunch | gonogo | launchday"
+      },
+      {
         "command": "/agent",
         "description": "Ask the LaunchPad AI agent a question",
         "usage_hint": "[your question]",

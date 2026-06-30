@@ -36,7 +36,7 @@ export async function executeLaunch(
 
   // 3. Update DB
   db.updateLaunchStatus(launchId, 'launched');
-
-  // 4. Archive the launch channel
-  await client.conversations.archive({ channel: launch.channel_id });
+  // NOTE: channel archiving now happens after the retro (see retro.ts),
+  // not immediately at launch. This keeps the channel open for monitoring
+  // and post-launch coordination during the first week.
 }

@@ -3,6 +3,8 @@ import type { App, BlockAction, ButtonAction } from '@slack/bolt';
 import * as db from '../db';
 import { updateLaunchCanvas } from '../services/canvasBuilder';
 import { executeLaunch } from '../services/launchDay';
+import { buildOutcomeModal, finalizeRetroAndArchive } from '../services/retro';
+import type { OutcomeFormInput } from '../types';
 
 interface StandupActionValue {
   itemId: number;
@@ -203,5 +205,39 @@ export function registerActions(app: App): void {
       channel: launch.channel_id,
       text: `🔴 *Launch on hold.* <@${body.user.id}> held the Go/No-Go. Discuss outstanding items in this channel.`,
     });
+  });
+
+  // ─── Retro: Start button clicked → open the outcome modal ────────────────
+  app.action('retro_start', async ({ ack, body, client, action }) => {
+    await ack();
+    if (action.type !== 'button') return;
+
+    const launchId = Number((action as ButtonAction).value);
+    const launch = db.getLaunchById(launchId);
+    if (!launch) return;
+
+    const b = body as BlockActionBody;
+    await client.views.open({
+      trigger_id: b.trigger_id,
+      view: buildOutcomeModal(launchId, launch.name),
+    });
+  });
+
+  // ─── Retro: Outcome modal submitted → save + archive everything ─────────
+  app.view('retro_outcome_submit', async ({ ack, view, client, body }) => {
+    await ack();
+
+    const launchId = Number(view.private_metadata);
+    const values = view.state.values;
+
+    const input: OutcomeFormInput = {
+      launchId,
+      whatWentWell: values.went_well?.input?.value ?? '',
+      whatDidnt: values.went_wrong?.input?.value ?? '',
+      adoptionNotes: values.adoption?.input?.value ?? '',
+      submittedBy: body.user.id,
+    };
+
+    await finalizeRetroAndArchive(client, input);
   });
 }
