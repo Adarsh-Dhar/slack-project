@@ -87,11 +87,11 @@ export function buildOutcomeModal(launchId, launchName) {
         type: 'input',
         block_id: 'adoption',
         label: { type: 'plain_text', text: 'Adoption / metrics notes' },
+        optional: true,
         element: {
           type: 'plain_text_input',
           action_id: 'input',
           multiline: true,
-          optional: true,
         },
       },
     ],

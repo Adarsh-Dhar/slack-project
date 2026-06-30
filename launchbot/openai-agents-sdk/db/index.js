@@ -39,6 +39,32 @@ export function getLaunchById(id) {
     .get(id);
 }
 
+export function getLaunchByName(name) {
+  return db
+    .prepare('SELECT * FROM launches WHERE name = ?')
+    .get(name);
+}
+
+export function getLaunchByNameFuzzy(name) {
+  // Try exact match first
+  const exact = db.prepare('SELECT * FROM launches WHERE name = ?').get(name);
+  if (exact) return exact;
+  
+  // Try case-insensitive match
+  const caseInsensitive = db.prepare('SELECT * FROM launches WHERE LOWER(name) = LOWER(?)').get(name);
+  if (caseInsensitive) return caseInsensitive;
+  
+  // Try with spaces instead of hyphens
+  const withSpaces = db.prepare('SELECT * FROM launches WHERE LOWER(name) = LOWER(?)').get(name.replace(/-/g, ' '));
+  if (withSpaces) return withSpaces;
+  
+  // Try with hyphens instead of spaces
+  const withHyphens = db.prepare('SELECT * FROM launches WHERE LOWER(name) = LOWER(?)').get(name.replace(/\s+/g, '-'));
+  if (withHyphens) return withHyphens;
+  
+  return null;
+}
+
 export function getAllActiveLaunches() {
   return db
     .prepare(`SELECT * FROM launches WHERE status = 'active'`)

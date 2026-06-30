@@ -1,7 +1,7 @@
-import { Agent, MCPServerStreamableHttp, run, setDefaultOpenAIClient, setTracingDisabled, tool } from '@openai/agents';
+import { Agent, MCPServerStreamableHttp, OpenAIChatCompletionsModel, run, setDefaultOpenAIClient, setTracingDisabled, tool } from '@openai/agents';
 import { z } from 'zod';
 
-import { githubModelsClient } from './githubModelsClient.js';
+import { getGitHubModelsClient } from './githubModelsClient.js';
 import { addEmojiReaction } from './tools/index.js';
 import * as db from '../db/index.js';
 import { calculatePhase } from '../services/phaseManager.js';
@@ -59,37 +59,56 @@ Also use them when the user explicitly asks you to perform a Slack action.`;
 const SLACK_MCP_URL = 'https://mcp.slack.com/mcp';
 
 // Configure GitHub Models client and disable tracing
+const githubModelsClient = getGitHubModelsClient();
 setDefaultOpenAIClient(githubModelsClient);
 setTracingDisabled(true);
 
 const getLaunchStatus = tool({
   name: 'get_launch_status',
-  description: 'Get the current status of a launch by channel name or ID. Returns phase, tier, launch date, and channel info.',
+  description: 'Get the current status of a launch by feature name, channel name, or channel ID. Returns phase, tier, launch date, and channel info.',
   parameters: z.object({
-    channel_identifier: z.string().describe('The channel name (e.g. launch-feature-x) or channel ID'),
+    feature_identifier: z.string().describe('The feature name (e.g. "Feature Y"), channel name (e.g. launch-feature-y), or channel ID'),
   }),
-  execute: async ({ channel_identifier }, context) => {
+  execute: async ({ feature_identifier }, context) => {
     const deps = context?.context;
     if (!deps) {
       return 'No deps available to check launch status.';
     }
 
     try {
-      let launch = db.getLaunchByChannel(channel_identifier);
-      
-      if (!launch && channel_identifier.startsWith('C')) {
-        launch = db.getLaunchByChannel(channel_identifier);
+      console.log('[DEBUG get_launch_status] Looking up:', feature_identifier);
+      let launch = db.getLaunchByNameFuzzy(feature_identifier);
+      console.log('[DEBUG get_launch_status] Fuzzy name lookup result:', launch);
+
+      if (!launch) {
+        // Try as channel name (with or without launch- prefix)
+        const channelName = feature_identifier.startsWith('launch-') 
+          ? feature_identifier 
+          : `launch-${feature_identifier.toLowerCase().replace(/\s+/g, '-')}`;
+        console.log('[DEBUG get_launch_status] Trying channel name:', channelName);
+        launch = db.getLaunchByChannel(channelName);
+        console.log('[DEBUG get_launch_status] Channel lookup result:', launch);
+      }
+
+      if (!launch && feature_identifier.startsWith('C')) {
+        // Try as channel ID
+        launch = db.getLaunchByChannel(feature_identifier);
       }
 
       if (!launch) {
-        const channelInfo = await deps.client.conversations.info({ channel: channel_identifier });
-        if (channelInfo.channel) {
-          launch = db.getLaunchByChannel(channelInfo.channel.id);
+        // Try to resolve via Slack API
+        try {
+          const channelInfo = await deps.client.conversations.info({ channel: feature_identifier });
+          if (channelInfo.channel) {
+            launch = db.getLaunchByChannel(channelInfo.channel.id);
+          }
+        } catch {
+          // Channel lookup failed, continue
         }
       }
 
       if (!launch) {
-        return `No active launch found for channel: ${channel_identifier}`;
+        return `No active launch found for: ${feature_identifier}`;
       }
 
       const computedPhase = calculatePhase(launch.launch_date);
@@ -319,7 +338,7 @@ export const starterAgent = new Agent({
   name: 'Starter Agent',
   instructions: SYSTEM_PROMPT,
   tools: [addEmojiReaction, getLaunchStatus, createLaunchConfirmation, triggerRetroConfirmation, syncPhaseStatus],
-  model: 'openai/gpt-4o-mini',
+  model: new OpenAIChatCompletionsModel(githubModelsClient, 'openai/gpt-4o-mini'),
 });
 
 /**
