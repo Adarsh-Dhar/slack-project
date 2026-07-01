@@ -3,7 +3,7 @@
 import * as db from '../../db/index.js';
 import { config } from '../../config.js';
 import { parseLaunchCommand } from '../../utils/parseCommand.js';
-import { resolvePlainMentions } from '../../utils/resolveMentions.js';
+import { resolvePlainMentions, resolvePlainChannelMentions } from '../../utils/resolveMentions.js';
 import { createLaunchChannels, buildChannelSummaryMessage } from '../../services/channelManager.js';
 import { DEFAULT_CHECKLIST } from '../../services/canvasBuilder.js';
 import { notifyItemOwner } from '../../services/ownership.js';
@@ -37,6 +37,11 @@ export function register(app) {
       const fallbackUserIds = await resolvePlainMentions(client, command.text, mentionedUsers);
       const allMentionedUsers = [...mentionedUsers, ...fallbackUserIds];
 
+      // Same problem as plain @usernames, but for #channel-name: catch
+      // channels typed without using Slack's autocomplete dropdown.
+      const fallbackChannelIds = await resolvePlainChannelMentions(client, command.text, mentionedChannels);
+      const allMentionedChannels = [...mentionedChannels, ...fallbackChannelIds];
+
       // 2–4. Create main + sub-channels based on tier
       const allUsers = [...new Set([pmUserId, ...allMentionedUsers])];
 
@@ -48,13 +53,36 @@ export function register(app) {
       );
       const launchChannelId = mainChannelId;
 
-      // 5. Welcome message
+      // 5. Resolve + join mentioned stakeholder channels *before* building
+      // the welcome message, so it can actually list them. Moved up from
+      // its old spot after DB save (was step 7).
+      const linkedChannels = [];
+      for (const chanId of allMentionedChannels) {
+        const info = await client.conversations.info({ channel: chanId }).catch(() => null);
+        const chanName = info?.channel?.name ?? chanId;
+        const team = inferTeam(chanName);
+        const joinResult = await client.conversations.join({ channel: chanId }).catch(err => {
+          const reason = err?.data?.error;
+          console.warn(`[/launch] Could not auto-join #${chanName}: ${reason || err.message}` +
+            (reason === 'method_not_supported_for_channel_type' || reason === 'channel_not_found'
+              ? ' (likely private — ask a member to /invite @LaunchBot instead)'
+              : ''));
+          return null;
+        });
+        // Only list it as "linked" if the join actually succeeded (or the
+        // bot was already in it) — don't claim success on a silent failure.
+        if (joinResult !== null) {
+          linkedChannels.push({ channelId: chanId, team, name: chanName });
+        }
+      }
+
+      // 6. Welcome message — now includes linked stakeholder channels
       const welcomeMsg = buildChannelSummaryMessage(
-        featureName, tier, launchChannelId, subChannels
+        featureName, tier, launchChannelId, subChannels, linkedChannels
       );
       await client.chat.postMessage({ channel: launchChannelId, text: welcomeMsg });
 
-      // 6. Save launch to DB
+      // 7. Save launch to DB
       const launchId = db.createLaunch({
         name: featureName,
         channelId: launchChannelId,
@@ -76,14 +104,11 @@ export function register(app) {
         db.setTeamRoster(launchId, team, usergroupId, allMentionedUsers);
       }
 
-      // 7. Register stakeholder channels from mentions
-      for (const chanId of mentionedChannels) {
-        const info = await client.conversations.info({ channel: chanId });
-        const chanName = info.channel?.name ?? '';
-        const team = inferTeam(chanName);
-        db.addStakeholderChannel({ launchId, channelId: chanId, team });
-        // Join the channel so the bot can read messages
-        await client.conversations.join({ channel: chanId }).catch(() => undefined);
+      // 7b. Register the already-joined stakeholder channels in the DB now
+      // that launchId exists (join + name/team resolution already happened
+      // above in step 5).
+      for (const { channelId, team } of linkedChannels) {
+        db.addStakeholderChannel({ launchId, channelId, team });
       }
 
       // 8. Build checklist items

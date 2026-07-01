@@ -162,12 +162,19 @@ export function getStakeholderChannels(launchId) {
 }
 
 export function getLaunchByStakeholderChannel(channelId) {
+  // Check stakeholder_channels first (sub-channels + external # mentions).
   const row = db
-    .prepare(
-      'SELECT launch_id FROM stakeholder_channels WHERE channel_id = ?'
-    )
+    .prepare('SELECT launch_id FROM stakeholder_channels WHERE channel_id = ?')
     .get(channelId);
-  return row ? getLaunchById(row.launch_id) : undefined;
+  if (row) return getLaunchById(row.launch_id);
+
+  // Fallback: check if the channel IS the main launch channel. The main
+  // channel lives in launches.channel_id, not stakeholder_channels, so
+  // slip-check messages posted there were silently ignored before this.
+  const launch = db
+    .prepare(`SELECT * FROM launches WHERE channel_id = ? AND status = 'active'`)
+    .get(channelId);
+  return launch ?? undefined;
 }
 
 // ─── Phase & roster helpers ─────────────────────────────────────────────────────

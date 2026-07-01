@@ -112,9 +112,11 @@ export async function createLaunchChannels(client, featureName, tier, initialUse
       continue;
     }
 
-    // Invite PM (first user) to all sub-channels so they have visibility
-    const pmId = initialUserIds[0];
-    if (pmId) await inviteUsers(client, subChannelId, [pmId]);
+    // Invite everyone mentioned on /launch to every sub-channel at creation
+    // time, not just the PM. This is intentionally broad (no per-team
+    // filtering) because /launch's mention syntax doesn't currently carry
+    // team assignment — see the note below on tightening this later.
+    await inviteUsers(client, subChannelId, initialUserIds);
 
     // Bot joins so it can read messages for slip detection
     await client.conversations.join({ channel: subChannelId }).catch(() => undefined);
@@ -131,8 +133,12 @@ export async function createLaunchChannels(client, featureName, tier, initialUse
 /**
  * Build a human-readable summary of all channels created.
  * Posted as the welcome message in the main launch channel.
+ *
+ * @param {Array<{channelId: string, team: string, name: string}>} linkedChannels
+ *   Stakeholder channels resolved from # mentions in /launch (not created
+ *   by the bot — pre-existing channels it joined to track for this launch).
  */
-export function buildChannelSummaryMessage(featureName, tier, mainChannelId, subChannels) {
+export function buildChannelSummaryMessage(featureName, tier, mainChannelId, subChannels, linkedChannels = []) {
   const tierLabel = tier.charAt(0).toUpperCase() + tier.slice(1);
 
   let msg = `👋 *${featureName}* launch workspace is ready! _(${tierLabel} tier)_\n\n`;
@@ -145,6 +151,13 @@ export function buildChannelSummaryMessage(featureName, tier, mainChannelId, sub
 
   if (subChannels.length === 0) {
     msg += `_Minor tier: no sub-channels created. All coordination happens here._\n`;
+  }
+
+  if (linkedChannels.length > 0) {
+    msg += `\n*Existing channels linked to this launch:*\n`;
+    for (const { channelId, team } of linkedChannels) {
+      msg += `• <#${channelId}> _(tracked as ${team})_\n`;
+    }
   }
 
   msg += `\nLaunchBot is ready to manage your launch workflow. Use /launch-phase to manually advance phases.`;
