@@ -56,10 +56,11 @@ async function fireDeadlineReminder(client, launch, deadlineKey, reminder, daysR
 
   if (reminder.team) {
     const userIds = await resolveTeamMembers(client, launch.id, reminder.team);
+    console.log(`[deadlines] ${deadlineKey} roster for launch ${launch.id}: ${userIds.length} member(s) ${JSON.stringify(userIds)}`);
     for (const userId of userIds) {
-      await client.chat.postMessage({ channel: userId, text }).catch(err =>
-        console.warn(`[deadlines] DM failed for ${userId} (${deadlineKey}):`, err.message)
-      );
+      await client.chat.postMessage({ channel: userId, text })
+        .then(r => console.log(`[deadlines] DM sent to ${userId} ts:${r.ts}`))
+        .catch(err => console.warn(`[deadlines] DM failed for ${userId} (${deadlineKey}): ${err.data?.error ?? err.message}`));
     }
   }
 
