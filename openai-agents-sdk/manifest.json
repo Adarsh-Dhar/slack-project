@@ -35,6 +35,12 @@
         "description": "Trigger the post-launch retro early",
         "usage_hint": "(run inside a launch channel)",
         "should_escape": false
+      },
+      {
+        "command": "/launch-feedback",
+        "description": "Add retro feedback for a launch",
+        "usage_hint": "(run inside a launch channel)",
+        "should_escape": false
       }
     ]
   },

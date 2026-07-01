@@ -4,7 +4,7 @@ import * as db from '../../db/index.js';
 import { buildFeedbackModal } from '../../services/feedback.js';
 
 export function register(app) {
-  app.command('/feedback', async ({ command, ack, client, respond }) => {
+  app.command('/launch-feedback', async ({ command, ack, client, respond }) => {
     await ack();
 
     try {

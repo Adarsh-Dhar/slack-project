@@ -132,7 +132,7 @@ export async function finalizeRetroAndArchive(client, input) {
       `✅ *Retro complete for ${launch.name}* — logged by <@${input.submittedBy}>\n\n` +
       outcomeSummary +
       `\n\n_This channel and all sub-channels will now be archived._`,
-  });
+  }).catch(err => console.error('[retro] Failed to post summary (channel may already be archived):', err.message));
 
   // 3. Archive the main channel
   await client.conversations.archive({ channel: launch.channel_id }).catch(err =>
