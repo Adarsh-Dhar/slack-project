@@ -5,6 +5,9 @@ import { getGitHubModelsClient } from './githubModelsClient.js';
 import { addEmojiReaction } from './tools/index.js';
 import * as db from '../db/index.js';
 import { calculatePhase } from '../services/phaseManager.js';
+import { buildLaunchReport, buildLaunchReportBlocks, buildPortfolioBlocks } from '../services/report.js';
+import { defineKpi, updateKpiValue, buildKpiListBlocks } from '../services/kpi.js';
+import { config } from '../config.js';
 
 const SYSTEM_PROMPT = `\
 You are a friendly Slack assistant. You help people by answering questions, \
@@ -39,6 +42,11 @@ You have access to launch management tools for creating and managing product lau
 - \`create_launch_confirmation\`: Post a confirmation button to create a new launch (requires user click to proceed)
 - \`trigger_retro_confirmation\`: Post a confirmation button to start a retro (requires user click to proceed)
 - \`sync_phase_status\`: Check phase sync status and optionally force sync with confirmation
+- \`get_launch_report\`: Post a leadership-style status report (phase, checklist completion, red items, open slip risk, KPIs, feedback) for the launch in this channel. Set share=true only if the user explicitly asks to send it to leadership.
+- \`get_launch_portfolio\`: Post a cross-launch snapshot of every active launch. Use this for "how are all my launches doing" style questions — it is not scoped to one channel.
+- \`manage_kpi\`: Define, update, or list success metrics/KPIs for the launch in this channel. Use action="set" the first time a metric is mentioned, action="update" to record a new value for a metric that already exists, and action="list" to show current metrics.
+
+\`get_launch_report\`, \`get_launch_portfolio\`, and \`manage_kpi\` are safe, non-destructive reads/updates — call them directly, no confirmation button needed.
 
 For destructive actions (create_launch, trigger_retro), always use the confirmation tools first — they post a button for the user to click before executing. This prevents accidental channel creation or archiving.
 
@@ -138,6 +146,156 @@ const getLaunchStatus = tool({
     } catch (e) {
       const err = /** @type {any} */ (e);
       return `Error checking launch status: ${err.message}`;
+    }
+  },
+});
+
+/**
+ * Shared launch resolution for the report/portfolio/kpi tools: prefers an
+ * explicit identifier (name or channel), falls back to the launch in the
+ * channel the agent is currently running in, same fallback getLaunchStatus
+ * uses for names/channel names/channel IDs.
+ */
+async function resolveLaunchForDeps(feature_identifier, deps) {
+  if (!feature_identifier) {
+    return db.getLaunchByChannel(deps.channelId);
+  }
+
+  let launch = db.getLaunchByNameFuzzy(feature_identifier);
+  if (launch) return launch;
+
+  const channelName = feature_identifier.startsWith('launch-')
+    ? feature_identifier
+    : `launch-${feature_identifier.toLowerCase().replace(/\s+/g, '-')}`;
+  launch = db.getLaunchByChannel(channelName);
+  if (launch) return launch;
+
+  if (feature_identifier.startsWith('C')) {
+    launch = db.getLaunchByChannel(feature_identifier);
+    if (launch) return launch;
+  }
+
+  try {
+    const channelInfo = await deps.client.conversations.info({ channel: feature_identifier });
+    if (channelInfo.channel) {
+      return db.getLaunchByChannel(channelInfo.channel.id);
+    }
+  } catch {
+    // Channel lookup failed
+  }
+
+  return null;
+}
+
+const getLaunchReport = tool({
+  name: 'get_launch_report',
+  description: 'Post a leadership-style status report for a launch: phase, checklist completion, red Go/No-Go items, open slip-risk flags, KPI progress, and feedback so far. Defaults to the launch in the current channel if no feature is named.',
+  parameters: z.object({
+    feature_identifier: z.string().nullable().describe('Feature name, channel name, or channel ID. Omit to use the launch in the current channel.'),
+    share_to_leadership: z.boolean().describe('Set true only if the user explicitly asks to send/share this to leadership.'),
+  }),
+  execute: async ({ feature_identifier, share_to_leadership }, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available to post the report.';
+
+    try {
+      const launch = await resolveLaunchForDeps(feature_identifier, deps);
+      if (!launch) {
+        return `No active launch found${feature_identifier ? ` for: ${feature_identifier}` : ' in this channel'}.`;
+      }
+
+      const report = buildLaunchReport(launch.id);
+      const blocks = buildLaunchReportBlocks(report);
+
+      await deps.client.chat.postMessage({
+        channel: deps.channelId,
+        text: `📊 Status report for ${launch.name}`,
+        blocks,
+      });
+
+      if (share_to_leadership) {
+        if (!config.LEADERSHIP_CHANNEL_ID) {
+          return `Posted the report here, but no leadership channel is configured (LEADERSHIP_CHANNEL_ID is unset), so I couldn't share it.`;
+        }
+        await deps.client.chat.postMessage({
+          channel: config.LEADERSHIP_CHANNEL_ID,
+          text: `📊 Status report for ${launch.name}`,
+          blocks,
+        });
+        return `Posted the status report for ${launch.name} and shared it to the leadership channel.`;
+      }
+
+      return `Posted the status report for ${launch.name}.`;
+    } catch (e) {
+      const err = /** @type {any} */ (e);
+      return `Error building report: ${err.message}`;
+    }
+  },
+});
+
+const getLaunchPortfolio = tool({
+  name: 'get_launch_portfolio',
+  description: 'Post a cross-launch snapshot of every active launch (phase, checklist completion, red/slip-risk flags, PM), sorted by launch date. Use for "how are all my launches doing" style questions — not scoped to any one channel.',
+  parameters: z.object({}),
+  execute: async (_args, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available to post the portfolio.';
+
+    try {
+      const blocks = buildPortfolioBlocks();
+      await deps.client.chat.postMessage({
+        channel: deps.channelId,
+        text: '📊 Launch Portfolio',
+        blocks,
+      });
+      return 'Posted the cross-launch portfolio view.';
+    } catch (e) {
+      const err = /** @type {any} */ (e);
+      return `Error building portfolio: ${err.message}`;
+    }
+  },
+});
+
+const manageKpi = tool({
+  name: 'manage_kpi',
+  description: 'Define, update, or list success metrics/KPIs for the launch in the current channel. Use action="set" the first time a metric is mentioned (with an optional target and unit), action="update" to record a new current value for a metric that already exists, and action="list" to show all metrics for this launch.',
+  parameters: z.object({
+    action: z.enum(['set', 'update', 'list']),
+    name: z.string().nullable().describe('The KPI name, e.g. "Activation rate". Required for set/update.'),
+    target_value: z.string().nullable().describe('Target value for action="set", e.g. "60".'),
+    unit: z.string().nullable().describe('Unit for action="set", e.g. "%".'),
+    current_value: z.string().nullable().describe('New current value for action="update".'),
+  }),
+  execute: async ({ action, name, target_value, unit, current_value }, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available to manage KPIs.';
+
+    try {
+      const launch = db.getLaunchByChannel(deps.channelId);
+      if (!launch) return 'No active launch found in this channel.';
+
+      if (action === 'list') {
+        const blocks = buildKpiListBlocks(launch.id, launch.name);
+        await deps.client.chat.postMessage({ channel: deps.channelId, text: `Success metrics for ${launch.name}`, blocks });
+        return `Posted the current success metrics for ${launch.name}.`;
+      }
+
+      if (action === 'set') {
+        if (!name) return 'A KPI name is required to define a metric.';
+        defineKpi({ launchId: launch.id, name, targetValue: target_value ?? null, unit: unit ?? null, updatedBy: deps.userId });
+        return `Now tracking "${name}"${target_value ? ` (target: ${target_value}${unit ?? ''})` : ''}.`;
+      }
+
+      if (action === 'update') {
+        if (!name || !current_value) return 'Both a KPI name and a new value are required to update a metric.';
+        updateKpiValue({ launchId: launch.id, name, currentValue: current_value, updatedBy: deps.userId });
+        return `Updated "${name}" to ${current_value}.`;
+      }
+
+      return `Unknown action: ${action}`;
+    } catch (e) {
+      const err = /** @type {any} */ (e);
+      return `Error managing KPI: ${err.message}`;
     }
   },
 });
@@ -343,7 +501,16 @@ const syncPhaseStatus = tool({
 export const starterAgent = new Agent({
   name: 'Starter Agent',
   instructions: SYSTEM_PROMPT,
-  tools: [addEmojiReaction, getLaunchStatus, createLaunchConfirmation, triggerRetroConfirmation, syncPhaseStatus],
+  tools: [
+    addEmojiReaction,
+    getLaunchStatus,
+    createLaunchConfirmation,
+    triggerRetroConfirmation,
+    syncPhaseStatus,
+    getLaunchReport,
+    getLaunchPortfolio,
+    manageKpi,
+  ],
   model: new OpenAIChatCompletionsModel(githubModelsClient, 'openai/gpt-4o-mini'),
 });
 
