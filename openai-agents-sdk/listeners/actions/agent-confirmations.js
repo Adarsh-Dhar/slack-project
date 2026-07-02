@@ -27,19 +27,31 @@ export function register(app) {
 
     try {
       const data = JSON.parse(body.actions[0].value);
-      const { feature_name, launch_date, tier, requester } = data;
+      const { feature_name, launch_date, tier, requester, stakeholderUsers = [], stakeholderChannels = [] } = data;
 
       const pmUserId = requester;
-      const channelId = body.channel.id;
 
-      // Create channels
-      const allUsers = [pmUserId];
+      // Create channels — include mentioned stakeholders so they're invited immediately
+      const allUsers = [...new Set([pmUserId, ...stakeholderUsers])];
       const { mainChannelId, subChannels } = await createLaunchChannels(
         client,
         feature_name,
         tier,
         allUsers
       );
+
+      // Join any mentioned stakeholder channels, same as /launch does
+      const linkedChannels = [];
+      for (const chanId of stakeholderChannels) {
+        const info = await client.conversations.info({ channel: chanId }).catch(() => null);
+        const chanName = info?.channel?.name ?? chanId;
+        const team = inferTeam(chanName);
+        const joinResult = await client.conversations.join({ channel: chanId }).catch(err => {
+          console.warn(`[create_launch_confirm] Could not auto-join #${chanName}: ${err?.data?.error || err.message}`);
+          return null;
+        });
+        if (joinResult !== null) linkedChannels.push({ channelId: chanId, team, name: chanName });
+      }
 
       // Welcome message
       const welcomeMsg = buildChannelSummaryMessage(
@@ -59,6 +71,11 @@ export function register(app) {
       // Register sub-channels
       for (const { channelId: subId, sub } of subChannels) {
         db.addStakeholderChannel({ launchId, channelId: subId, team: sub.team });
+      }
+
+      // Register linked stakeholder channels (parity with /launch)
+      for (const lc of linkedChannels) {
+        db.addStakeholderChannel({ launchId, channelId: lc.channelId, team: lc.team });
       }
 
       // Register team rosters

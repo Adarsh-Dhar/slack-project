@@ -409,3 +409,57 @@ export function getPortfolioSnapshot() {
     )
     .all();
 }
+
+// ─── Comms log helpers ────────────────────────────────────────────────────────
+
+export function logComms({ launchId, channel, status, triggeredBy, detail }) {
+  db.prepare(
+    `INSERT INTO comms_log (launch_id, channel, status, triggered_by, detail)
+     VALUES (?, ?, ?, ?, ?)`
+  ).run(launchId, channel, status, triggeredBy, detail ?? null);
+}
+
+export function getCommsLog(launchId) {
+  return db.prepare('SELECT * FROM comms_log WHERE launch_id = ? ORDER BY created_at DESC').all(launchId);
+}
+
+// ─── Budget helpers ───────────────────────────────────────────────────────────
+
+export function upsertBudgetItem({ launchId, category, approvedAmount, approver, updatedBy }) {
+  db.prepare(
+    `INSERT INTO budget_items (launch_id, category, approved_amount, approver, updated_by)
+     VALUES (@launchId, @category, @approvedAmount, @approver, @updatedBy)
+     ON CONFLICT(launch_id, category) DO UPDATE SET
+       approved_amount = excluded.approved_amount,
+       approver = excluded.approver,
+       updated_by = excluded.updated_by,
+       updated_at = datetime('now')`
+  ).run({ launchId, category, approvedAmount: approvedAmount ?? null, approver: approver ?? null, updatedBy });
+}
+
+export function recordSpend({ launchId, category, spentAmount, updatedBy }) {
+  db.prepare(
+    `UPDATE budget_items SET spent_amount = ?, updated_by = ?, updated_at = datetime('now')
+     WHERE launch_id = ? AND category = ?`
+  ).run(spentAmount, updatedBy, launchId, category);
+}
+
+export function getBudgetForLaunch(launchId) {
+  return db.prepare('SELECT * FROM budget_items WHERE launch_id = ? ORDER BY created_at ASC').all(launchId);
+}
+
+// ─── CS readiness helpers ─────────────────────────────────────────────────────
+
+export function upsertCsReadinessItem({ launchId, item, link, status, updatedBy }) {
+  db.prepare(
+    `INSERT INTO cs_readiness_items (launch_id, item, link, status, updated_by)
+     VALUES (@launchId, @item, @link, @status, @updatedBy)
+     ON CONFLICT(launch_id, item) DO UPDATE SET
+       link = excluded.link, status = excluded.status,
+       updated_by = excluded.updated_by, updated_at = datetime('now')`
+  ).run({ launchId, item, link: link ?? null, status: status ?? 'not_started', updatedBy });
+}
+
+export function getCsReadinessForLaunch(launchId) {
+  return db.prepare('SELECT * FROM cs_readiness_items WHERE launch_id = ? ORDER BY created_at ASC').all(launchId);
+}

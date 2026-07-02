@@ -114,3 +114,43 @@ CREATE TABLE IF NOT EXISTS kpis (
   created_at    TEXT DEFAULT (datetime('now')),
   UNIQUE(launch_id, name)
 );
+
+-- Outbound comms triggered for a launch (announcement posts, blog, email, social).
+-- Purely a log/audit trail — actual delivery happens via services/comms.js.
+CREATE TABLE IF NOT EXISTS comms_log (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  launch_id    INTEGER NOT NULL REFERENCES launches(id),
+  channel      TEXT NOT NULL CHECK (channel IN ('blog', 'email', 'social', 'press')),
+  status       TEXT NOT NULL DEFAULT 'sent' CHECK (status IN ('sent', 'failed')),
+  triggered_by TEXT NOT NULL,
+  detail       TEXT,
+  created_at   TEXT DEFAULT (datetime('now'))
+);
+
+-- Budget/resource tracking per launch. Mirrors the kpis table shape.
+CREATE TABLE IF NOT EXISTS budget_items (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  launch_id       INTEGER NOT NULL REFERENCES launches(id),
+  category        TEXT NOT NULL,
+  approved_amount TEXT,
+  spent_amount    TEXT,
+  approver        TEXT,
+  updated_by      TEXT,
+  updated_at      TEXT DEFAULT (datetime('now')),
+  created_at      TEXT DEFAULT (datetime('now')),
+  UNIQUE(launch_id, category)
+);
+
+-- Structured CS/support readiness items (FAQ docs, macros, escalation paths),
+-- distinct from the generic checklist so they can carry a link + status.
+CREATE TABLE IF NOT EXISTS cs_readiness_items (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  launch_id   INTEGER NOT NULL REFERENCES launches(id),
+  item        TEXT NOT NULL,
+  link        TEXT,
+  status      TEXT NOT NULL DEFAULT 'not_started' CHECK (status IN ('not_started', 'in_progress', 'done')),
+  updated_by  TEXT,
+  updated_at  TEXT DEFAULT (datetime('now')),
+  created_at  TEXT DEFAULT (datetime('now')),
+  UNIQUE(launch_id, item)
+);

@@ -8,6 +8,10 @@ import { calculatePhase } from '../services/phaseManager.js';
 import { buildLaunchReport, buildLaunchReportBlocks, buildPortfolioBlocks } from '../services/report.js';
 import { defineKpi, updateKpiValue, buildKpiListBlocks } from '../services/kpi.js';
 import { config } from '../config.js';
+import { triggerComms } from '../services/comms.js';
+import { getLiveMetrics } from '../services/monitoring.js';
+import { defineBudgetItem, updateSpend, buildBudgetListBlocks } from '../services/budget.js';
+import { setCsReadinessItem, buildCsReadinessBlocks } from '../services/csReadiness.js';
 
 const SYSTEM_PROMPT = `\
 You are a friendly Slack assistant. You help people by answering questions, \
@@ -39,16 +43,21 @@ Vary your picks across a thread; don't repeat the same emoji.
 ## LAUNCH MANAGEMENT TOOLS
 You have access to launch management tools for creating and managing product launches:
 - \`get_launch_status\`: Check the current phase, tier, and channel info for a launch
-- \`create_launch_confirmation\`: Post a confirmation button to create a new launch (requires user click to proceed)
+- \`create_launch_confirmation\`: Post a confirmation button to create a new launch (requires user click to proceed). When the user @-mentions teammates or #-mentions channels while asking to create a launch, pass them as mentioned_user_ids / mentioned_channel_ids so they're invited automatically.
 - \`trigger_retro_confirmation\`: Post a confirmation button to start a retro (requires user click to proceed)
-- \`sync_phase_status\`: Check phase sync status and optionally force sync with confirmation
+- \`sync_phase_status\`: Check phase sync status, force sync with confirmation, or manually override to a specific phase (use manual_phase param when the user explicitly names a phase).
 - \`get_launch_report\`: Post a leadership-style status report (phase, checklist completion, red items, open slip risk, KPIs, feedback) for the launch in this channel. Set share=true only if the user explicitly asks to send it to leadership.
 - \`get_launch_portfolio\`: Post a cross-launch snapshot of every active launch. Use this for "how are all my launches doing" style questions — it is not scoped to one channel.
 - \`manage_kpi\`: Define, update, or list success metrics/KPIs for the launch in this channel. Use action="set" the first time a metric is mentioned, action="update" to record a new value for a metric that already exists, and action="list" to show current metrics.
+- \`open_feedback_prompt\`: Post a button so the user can submit retro feedback for the launch in this channel.
+- \`trigger_comms_confirmation\`: Post a confirmation button to send an external announcement (blog, email, social, press). Never sends comms directly — always requires user confirmation.
+- \`get_live_metrics\`: Fetch current error rate / key metrics for the launch from the monitoring provider.
+- \`manage_budget\`: Define, update, or list budget/spend for the launch in this channel.
+- \`manage_cs_readiness\`: Track CS/support readiness items (FAQ docs, macros, escalation paths) for the launch in this channel.
 
-\`get_launch_report\`, \`get_launch_portfolio\`, and \`manage_kpi\` are safe, non-destructive reads/updates — call them directly, no confirmation button needed.
+\`get_launch_report\`, \`get_launch_portfolio\`, \`manage_kpi\`, \`open_feedback_prompt\`, \`get_live_metrics\`, \`manage_budget\`, and \`manage_cs_readiness\` are safe, non-destructive reads/updates — call them directly, no confirmation button needed.
 
-For destructive actions (create_launch, trigger_retro), always use the confirmation tools first — they post a button for the user to click before executing. This prevents accidental channel creation or archiving.
+For destructive or outbound actions (create_launch, trigger_retro, trigger_comms), always use the confirmation tools first — they post a button for the user to click before executing. This prevents accidental channel creation, archiving, or external sends.
 
 ## CRITICAL RULE FOR LAUNCH ACTIONS
 If the user asks to create, start, wrap up, finish, close, or archive a launch, you MUST call the 
@@ -307,8 +316,10 @@ const createLaunchConfirmation = tool({
     feature_name: z.string().describe('The name of the feature (e.g. "New Dashboard")'),
     launch_date: z.string().describe('Launch date in ISO format (YYYY-MM-DD) or Month-Day (e.g. July-1)'),
     tier: z.enum(['major', 'moderate', 'minor']).describe('Launch tier: major, moderate, or minor'),
+    mentioned_user_ids: z.array(z.string()).nullable().describe('Slack user IDs (e.g. "U0123ABC") of any teammates the user @-mentioned as stakeholders. Extract these from <@U...> tokens in the user\'s message. Omit/empty if none were mentioned.'),
+    mentioned_channel_ids: z.array(z.string()).nullable().describe('Slack channel IDs (e.g. "C0123ABC") of any channels the user #-mentioned to link as stakeholder channels. Extract from <#C...|name> tokens. Omit/empty if none were mentioned.'),
   }),
-  execute: async ({ feature_name, launch_date, tier }, context) => {
+  execute: async ({ feature_name, launch_date, tier, mentioned_user_ids, mentioned_channel_ids }, context) => {
     const deps = context?.context;
     if (!deps) {
       return 'No deps available to post confirmation.';
@@ -316,7 +327,12 @@ const createLaunchConfirmation = tool({
 
     try {
       const tierLabel = tier.charAt(0).toUpperCase() + tier.slice(1);
-      
+      const stakeholderUsers = mentioned_user_ids ?? [];
+      const stakeholderChannels = mentioned_channel_ids ?? [];
+      const stakeholderLine = stakeholderUsers.length
+        ? `\n*Stakeholders:* ${stakeholderUsers.map(id => `<@${id}>`).join(', ')}`
+        : '';
+
       await deps.client.chat.postMessage({
         channel: deps.channelId,
         text: `🚀 Create Launch: ${feature_name}?`,
@@ -326,8 +342,9 @@ const createLaunchConfirmation = tool({
             text: {
               type: 'mrkdwn',
               text: `🚀 *Create Launch: ${feature_name}?*\n\n` +
-                    `**Launch Date:** ${launch_date}\n` +
-                    `**Tier:** ${tierLabel}\n\n` +
+                    `*Launch Date:* ${launch_date}\n` +
+                    `*Tier:* ${tierLabel}` +
+                    `${stakeholderLine}\n\n` +
                     `Click below to confirm and create the launch channels.`,
             },
           },
@@ -340,7 +357,10 @@ const createLaunchConfirmation = tool({
                 text: { type: 'plain_text', text: '✅ Create Launch', emoji: true },
                 style: 'primary',
                 action_id: 'create_launch_confirm',
-                value: JSON.stringify({ feature_name, launch_date, tier, requester: deps.userId }),
+                value: JSON.stringify({
+                  feature_name, launch_date, tier, requester: deps.userId,
+                  stakeholderUsers, stakeholderChannels,
+                }),
               },
             ],
           },
@@ -418,12 +438,14 @@ const triggerRetroConfirmation = tool({
 
 const syncPhaseStatus = tool({
   name: 'sync_phase_status',
-  description: 'Check the phase sync status for a launch. Optionally force sync with confirmation if the phase has changed.',
+  description: 'Check the phase sync status for a launch, or manually override it to a specific phase. Optionally force sync with confirmation if the phase has changed.',
   parameters: z.object({
     channel_identifier: z.string().describe('The channel name or ID'),
     force_sync: z.boolean().optional().describe('Set to true to force phase sync with confirmation'),
+    manual_phase: z.enum(['discovery', 'build', 'prelaunch', 'gonogo', 'launchday']).nullable()
+      .describe('Set to manually override the phase to this exact value, regardless of the computed phase. Use when the user explicitly says e.g. "set the phase to launchday".'),
   }),
-  execute: async ({ channel_identifier, force_sync = false }, context) => {
+  execute: async ({ channel_identifier, force_sync = false, manual_phase }, context) => {
     const deps = context?.context;
     if (!deps) {
       return 'No deps available to check phase status.';
@@ -449,6 +471,39 @@ const syncPhaseStatus = tool({
 
       const computedPhase = calculatePhase(launch.launch_date);
       const isSynced = launch.current_phase === computedPhase;
+
+      // Manual override path — posts a confirm button regardless of computed phase
+      if (manual_phase) {
+        await deps.client.chat.postMessage({
+          channel: deps.channelId,
+          text: `🔄 Manually set phase for ${launch.name} to ${manual_phase}?`,
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: `🔄 *Manually set phase for ${launch.name}?*\n\n` +
+                      `Current: ${launch.current_phase} → Requested: *${manual_phase}*\n\n` +
+                      `Click below to confirm the override.`,
+              },
+            },
+            {
+              type: 'actions',
+              block_id: 'sync_phase_confirm',
+              elements: [
+                {
+                  type: 'button',
+                  text: { type: 'plain_text', text: '✅ Set Phase', emoji: true },
+                  style: 'primary',
+                  action_id: 'sync_phase_confirm',
+                  value: JSON.stringify({ launch_id: launch.id, new_phase: manual_phase }),
+                },
+              ],
+            },
+          ],
+        });
+        return `Posted confirmation button to manually set the phase to ${manual_phase}.`;
+      }
 
       let statusText = `📊 *${launch.name}* Phase Sync Status\n\n`;
       statusText += `**Current Phase in DB:** ${launch.current_phase}\n`;
@@ -498,6 +553,199 @@ const syncPhaseStatus = tool({
   },
 });
 
+// ─── A2: Feedback prompt tool ─────────────────────────────────────────────────
+
+const openFeedbackPrompt = tool({
+  name: 'open_feedback_prompt',
+  description: 'Post a button that lets the user (or anyone in the channel) open the launch feedback form for the launch in this channel. Use when someone wants to add feedback, e.g. "I want to leave feedback on this launch".',
+  parameters: z.object({}),
+  execute: async (_args, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available to post the feedback prompt.';
+
+    try {
+      const launch = db.getLaunchByChannel(deps.channelId);
+      if (!launch) return 'No active launch found in this channel.';
+
+      await deps.client.chat.postMessage({
+        channel: deps.channelId,
+        text: `💬 Add feedback for ${launch.name}`,
+        blocks: [
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text: `💬 *Add feedback for ${launch.name}*` },
+          },
+          {
+            type: 'actions',
+            elements: [
+              {
+                type: 'button',
+                text: { type: 'plain_text', text: '💬 Add Feedback', emoji: true },
+                action_id: 'feedback_add',
+                value: String(launch.id),
+              },
+            ],
+          },
+        ],
+      });
+
+      return `Posted a feedback button for ${launch.name}.`;
+    } catch (e) {
+      const err = /** @type {any} */ (e);
+      return `Error posting feedback prompt: ${err.message}`;
+    }
+  },
+});
+
+// ─── B1: Comms confirmation tool ─────────────────────────────────────────────
+
+const triggerCommsConfirmation = tool({
+  name: 'trigger_comms_confirmation',
+  description: 'Use when the user wants to send an external announcement (blog, email, social, or press) for the launch in this channel. Posts a confirmation button — never sends comms directly.',
+  parameters: z.object({
+    channel: z.enum(['blog', 'email', 'social', 'press']).describe('The outbound comms channel to send to.'),
+    message: z.string().describe('The announcement text to send.'),
+  }),
+  execute: async ({ channel, message }, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available to post confirmation.';
+
+    try {
+      const launch = db.getLaunchByChannel(deps.channelId);
+      if (!launch) return 'No active launch found in this channel.';
+
+      await deps.client.chat.postMessage({
+        channel: deps.channelId,
+        text: `📣 Send ${channel} comms for ${launch.name}?`,
+        blocks: [
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text: `📣 *Send ${channel} comms for ${launch.name}?*\n\n>${message}` },
+          },
+          {
+            type: 'actions',
+            block_id: 'trigger_comms_confirm',
+            elements: [{
+              type: 'button',
+              text: { type: 'plain_text', text: `✅ Send ${channel}`, emoji: true },
+              style: 'primary',
+              action_id: 'trigger_comms_confirm',
+              value: JSON.stringify({ launchId: launch.id, channel, message, requester: deps.userId }),
+            }],
+          },
+        ],
+      });
+      return `Posted confirmation button to send ${channel} comms.`;
+    } catch (e) {
+      const err = /** @type {any} */ (e);
+      return `Error posting comms confirmation: ${err.message}`;
+    }
+  },
+});
+
+// ─── B2: Live metrics tool ────────────────────────────────────────────────────
+
+const getLiveMetricsTool = tool({
+  name: 'get_live_metrics',
+  description: 'Fetch current error rate / key metrics for the launch in this channel from the monitoring provider (requires MONITORING_API_URL to be configured).',
+  parameters: z.object({}),
+  execute: async (_args, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available to fetch metrics.';
+
+    try {
+      const launch = db.getLaunchByChannel(deps.channelId);
+      if (!launch) return 'No active launch found in this channel.';
+
+      const metrics = await getLiveMetrics(launch.name);
+      return `📈 Live metrics for ${launch.name}: ${JSON.stringify(metrics, null, 2)}`;
+    } catch (e) {
+      const err = /** @type {any} */ (e);
+      return `Error fetching live metrics: ${err.message}`;
+    }
+  },
+});
+
+// ─── B3: Budget tool ──────────────────────────────────────────────────────────
+
+const manageBudget = tool({
+  name: 'manage_budget',
+  description: 'Define, update, or list budget/spend for the launch in this channel. action="set" defines a category with an approved amount, action="update" records new spend, action="list" shows all categories.',
+  parameters: z.object({
+    action: z.enum(['set', 'update', 'list']),
+    category: z.string().nullable().describe('Budget category, e.g. "Paid social ads". Required for set/update.'),
+    approved_amount: z.string().nullable().describe('Approved budget amount for action="set", e.g. "5000".'),
+    approver: z.string().nullable().describe('Slack user ID of the approver, for action="set".'),
+    spent_amount: z.string().nullable().describe('New spend amount for action="update".'),
+  }),
+  execute: async ({ action, category, approved_amount, approver, spent_amount }, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available to manage budget.';
+
+    try {
+      const launch = db.getLaunchByChannel(deps.channelId);
+      if (!launch) return 'No active launch found in this channel.';
+
+      if (action === 'list') {
+        const blocks = buildBudgetListBlocks(launch.id, launch.name);
+        await deps.client.chat.postMessage({ channel: deps.channelId, text: `Budget for ${launch.name}`, blocks });
+        return `Posted the current budget for ${launch.name}.`;
+      }
+      if (action === 'set') {
+        if (!category) return 'A budget category is required.';
+        defineBudgetItem({ launchId: launch.id, category, approvedAmount: approved_amount ?? null, approver: approver ?? null, updatedBy: deps.userId });
+        return `Now tracking "${category}"${approved_amount ? ` (approved: ${approved_amount})` : ''}.`;
+      }
+      if (action === 'update') {
+        if (!category || !spent_amount) return 'Both a category and a spent amount are required.';
+        updateSpend({ launchId: launch.id, category, spentAmount: spent_amount, updatedBy: deps.userId });
+        return `Updated "${category}" spend to ${spent_amount}.`;
+      }
+      return `Unknown action: ${action}`;
+    } catch (e) {
+      const err = /** @type {any} */ (e);
+      return `Error managing budget: ${err.message}`;
+    }
+  },
+});
+
+// ─── B4: CS readiness tool ────────────────────────────────────────────────────
+
+const manageCsReadiness = tool({
+  name: 'manage_cs_readiness',
+  description: 'Track CS/support readiness items (FAQ docs, macros, escalation paths) for the launch in this channel. action="set" creates or updates an item (with optional link and status), action="list" shows all items.',
+  parameters: z.object({
+    action: z.enum(['set', 'list']),
+    item: z.string().nullable().describe('The readiness item name, e.g. "Support FAQ doc". Required for action="set".'),
+    link: z.string().nullable().describe('URL to the doc or resource, for action="set".'),
+    status: z.enum(['not_started', 'in_progress', 'done']).nullable().describe('Item status, for action="set".'),
+  }),
+  execute: async ({ action, item, link, status }, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available to manage CS readiness.';
+
+    try {
+      const launch = db.getLaunchByChannel(deps.channelId);
+      if (!launch) return 'No active launch found in this channel.';
+
+      if (action === 'list') {
+        const blocks = buildCsReadinessBlocks(launch.id, launch.name);
+        await deps.client.chat.postMessage({ channel: deps.channelId, text: `CS readiness for ${launch.name}`, blocks });
+        return `Posted CS readiness items for ${launch.name}.`;
+      }
+      if (action === 'set') {
+        if (!item) return 'An item name is required.';
+        setCsReadinessItem({ launchId: launch.id, item, link: link ?? null, status: status ?? 'not_started', updatedBy: deps.userId });
+        return `Tracked CS readiness item "${item}"${status ? ` (${status})` : ''}.`;
+      }
+      return `Unknown action: ${action}`;
+    } catch (e) {
+      const err = /** @type {any} */ (e);
+      return `Error managing CS readiness: ${err.message}`;
+    }
+  },
+});
+
 export const starterAgent = new Agent({
   name: 'Starter Agent',
   instructions: SYSTEM_PROMPT,
@@ -510,6 +758,11 @@ export const starterAgent = new Agent({
     getLaunchReport,
     getLaunchPortfolio,
     manageKpi,
+    openFeedbackPrompt,
+    triggerCommsConfirmation,
+    getLiveMetricsTool,
+    manageBudget,
+    manageCsReadiness,
   ],
   model: new OpenAIChatCompletionsModel(githubModelsClient, 'openai/gpt-4o-mini'),
 });

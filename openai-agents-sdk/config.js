@@ -19,6 +19,19 @@ export const config = {
   // mirrors reports into. Leave unset to only post reports in-channel.
   LEADERSHIP_CHANNEL_ID: process.env['LEADERSHIP_CHANNEL_ID'] ?? '',
 
+  // Outbound comms webhooks, one per channel type. Point these at your
+  // CMS/ESP/social-scheduler's incoming webhook, or an internal proxy.
+  COMMS_WEBHOOKS: {
+    blog:   process.env['COMMS_WEBHOOK_BLOG']   ?? '',
+    email:  process.env['COMMS_WEBHOOK_EMAIL']  ?? '',
+    social: process.env['COMMS_WEBHOOK_SOCIAL'] ?? '',
+    press:  process.env['COMMS_WEBHOOK_PRESS']  ?? '',
+  },
+
+  // Monitoring provider — used by services/monitoring.js pull-based tool.
+  MONITORING_API_URL: process.env['MONITORING_API_URL'] ?? '',
+  MONITORING_API_KEY: process.env['MONITORING_API_KEY'] ?? '',
+
   TIER_CHANNELS: {
     major: [
       { suffix: 'eng',          team: 'engineering', purpose: 'Engineering build coordination' },
