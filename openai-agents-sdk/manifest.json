@@ -37,6 +37,24 @@
         "should_escape": false
       },
       {
+        "command": "/launch-report",
+        "description": "Post a leadership-ready status report for this launch",
+        "usage_hint": "[share]",
+        "should_escape": false
+      },
+      {
+        "command": "/launch-portfolio",
+        "description": "View a cross-launch snapshot of all active launches",
+        "usage_hint": "",
+        "should_escape": false
+      },
+      {
+        "command": "/launch-kpi",
+        "description": "Define and update success metrics for this launch",
+        "usage_hint": "set \"Name\" target:60 unit:% | update \"Name\" 42 | list",
+        "should_escape": false
+      },
+      {
         "command": "/launch-feedback",
         "description": "Add retro feedback for a launch",
         "usage_hint": "(run inside a launch channel)",

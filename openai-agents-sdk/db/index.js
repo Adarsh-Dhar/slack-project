@@ -314,3 +314,98 @@ export function getFeedbackForLaunch(launchId) {
     .prepare('SELECT * FROM feedback WHERE launch_id = ? ORDER BY created_at ASC')
     .all(launchId);
 }
+
+// ─── Slip event helpers ───────────────────────────────────────────────────────
+
+export function createSlipEvent({ launchId, channelId, detectedUserId, messageText }) {
+  const stmt = db.prepare(
+    `INSERT INTO slip_events (launch_id, channel_id, detected_user_id, message_text)
+     VALUES (@launchId, @channelId, @detectedUserId, @messageText)`
+  );
+  const result = stmt.run({ launchId, channelId, detectedUserId, messageText });
+  return result.lastInsertRowid;
+}
+
+export function resolveSlipEvent(id, status, resolvedBy) {
+  db.prepare(
+    `UPDATE slip_events SET status = ?, resolved_by = ?, resolved_at = datetime('now') WHERE id = ?`
+  ).run(status, resolvedBy, id);
+}
+
+export function getSlipEvent(id) {
+  return db.prepare('SELECT * FROM slip_events WHERE id = ?').get(id);
+}
+
+export function getSlipEventsForLaunch(launchId) {
+  return db
+    .prepare('SELECT * FROM slip_events WHERE launch_id = ? ORDER BY created_at DESC')
+    .all(launchId);
+}
+
+export function getOpenSlipEventCount(launchId) {
+  return db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM slip_events
+       WHERE launch_id = ? AND status IN ('pending', 'confirmed', 'explaining')`
+    )
+    .get(launchId).n;
+}
+
+// ─── KPI / success metric helpers ─────────────────────────────────────────────
+
+export function upsertKpi({ launchId, name, targetValue, unit, updatedBy }) {
+  db.prepare(
+    `INSERT INTO kpis (launch_id, name, target_value, unit, updated_by)
+     VALUES (@launchId, @name, @targetValue, @unit, @updatedBy)
+     ON CONFLICT(launch_id, name) DO UPDATE SET
+       target_value = excluded.target_value,
+       unit = excluded.unit,
+       updated_by = excluded.updated_by,
+       updated_at = datetime('now')`
+  ).run({ launchId, name, targetValue: targetValue ?? null, unit: unit ?? null, updatedBy });
+}
+
+export function recordKpiValue({ launchId, name, currentValue, updatedBy }) {
+  db.prepare(
+    `UPDATE kpis SET current_value = ?, updated_by = ?, updated_at = datetime('now')
+     WHERE launch_id = ? AND name = ?`
+  ).run(currentValue, updatedBy, launchId, name);
+}
+
+export function getKpisForLaunch(launchId) {
+  return db
+    .prepare('SELECT * FROM kpis WHERE launch_id = ? ORDER BY created_at ASC')
+    .all(launchId);
+}
+
+// ─── Cross-launch / portfolio helpers ─────────────────────────────────────────
+
+export function getAllLaunches() {
+  return db.prepare('SELECT * FROM launches ORDER BY launch_date ASC').all();
+}
+
+export function getLaunchesByPm(pmUserId) {
+  return db
+    .prepare(`SELECT * FROM launches WHERE pm_user_id = ? AND status != 'archived' ORDER BY launch_date ASC`)
+    .all(pmUserId);
+}
+
+export function getPortfolioSnapshot() {
+  // One row per non-archived launch with item completion + red-item + open
+  // slip-event counts, for the cross-launch /launch-portfolio view and for
+  // services/report.js.
+  return db
+    .prepare(
+      `SELECT
+         l.id, l.name, l.channel_id, l.launch_date, l.pm_user_id, l.tier,
+         l.status, l.current_phase,
+         (SELECT COUNT(*) FROM items i WHERE i.launch_id = l.id) AS total_items,
+         (SELECT COUNT(*) FROM items i WHERE i.launch_id = l.id AND i.status = 'done') AS done_items,
+         (SELECT COUNT(*) FROM gonogo_responses g WHERE g.launch_id = l.id AND g.status = 'red') AS red_items,
+         (SELECT COUNT(*) FROM slip_events s WHERE s.launch_id = l.id AND s.status IN ('pending','confirmed','explaining')) AS open_slips
+       FROM launches l
+       WHERE l.status != 'archived'
+       ORDER BY l.launch_date ASC`
+    )
+    .all();
+}

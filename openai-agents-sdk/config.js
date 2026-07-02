@@ -15,6 +15,10 @@ export const config = {
   PORT: parseInt(process.env['PORT'] ?? '3000', 10),
   DB_PATH: process.env['DB_PATH'] ?? './launchbot.db',
 
+  // Optional: a channel ID (e.g. #launch-leadership) that /launch-report share
+  // mirrors reports into. Leave unset to only post reports in-channel.
+  LEADERSHIP_CHANNEL_ID: process.env['LEADERSHIP_CHANNEL_ID'] ?? '',
+
   TIER_CHANNELS: {
     major: [
       { suffix: 'eng',          team: 'engineering', purpose: 'Engineering build coordination' },

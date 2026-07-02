@@ -84,3 +84,33 @@ CREATE TABLE IF NOT EXISTS feedback (
   text        TEXT NOT NULL,
   created_at  TEXT DEFAULT (datetime('now'))
 );
+
+-- Resolutions for slip alerts raised by services/slipDetector.js. Previously
+-- the Yes/No/Explain buttons only called ack() with no persistence or
+-- follow-up action (see listeners/actions/slip-actions.js).
+CREATE TABLE IF NOT EXISTS slip_events (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  launch_id     INTEGER NOT NULL REFERENCES launches(id),
+  channel_id    TEXT NOT NULL,
+  detected_user_id TEXT NOT NULL,
+  message_text  TEXT,
+  status        TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'dismissed', 'explaining')),
+  resolved_by   TEXT,
+  resolved_at   TEXT,
+  created_at    TEXT DEFAULT (datetime('now'))
+);
+
+-- Success metrics / KPIs a PM wants tracked for a launch, so status and
+-- leadership reports can include more than checklist completion.
+CREATE TABLE IF NOT EXISTS kpis (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  launch_id     INTEGER NOT NULL REFERENCES launches(id),
+  name          TEXT NOT NULL,
+  target_value  TEXT,
+  current_value TEXT,
+  unit          TEXT,
+  updated_by    TEXT,
+  updated_at    TEXT DEFAULT (datetime('now')),
+  created_at    TEXT DEFAULT (datetime('now')),
+  UNIQUE(launch_id, name)
+);

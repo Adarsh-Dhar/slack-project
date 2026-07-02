@@ -24,6 +24,8 @@ export const DEFAULT_CHECKLIST = {
   sales: [
     { title: 'Sales briefing sent', dueOffsetDays: -3 },
     { title: 'Demo environment ready', dueOffsetDays: -2 },
+    { title: 'Support FAQ / macros drafted', dueOffsetDays: -3 },
+    { title: 'CS team briefed on known issues & escalation path', dueOffsetDays: -1 },
   ],
   other: [],
 };

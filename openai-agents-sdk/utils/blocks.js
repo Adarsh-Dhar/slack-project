@@ -43,8 +43,8 @@ export function buildStandupBlocks(input) {
 }
 
 export function buildSlipAlertBlocks(input) {
-  const { detectedUserId, channelName, messageText, launchDate, launchId } = input;
-  const value = JSON.stringify({ launchId, detectedUserId });
+  const { slipEventId, detectedUserId, channelName, messageText, launchDate, launchId } = input;
+  const value = JSON.stringify({ launchId, detectedUserId, slipEventId });
 
   return [
     {
@@ -84,15 +84,31 @@ export function buildSlipAlertBlocks(input) {
           text: { type: 'plain_text', text: "No, we're fine" },
           style: 'primary',
           action_id: 'slip_no',
-          value: JSON.stringify({ launchId }),
+          value,
         },
         {
           type: 'button',
           text: { type: 'plain_text', text: "I'll explain in thread" },
           action_id: 'slip_explain',
-          value: JSON.stringify({ launchId }),
+          value,
         },
       ],
+    },
+  ];
+}
+
+/**
+ * Replaces the slip-alert action buttons with a static resolution line once
+ * the PM or the flagged user has responded, so the alert stops looking
+ * actionable and the outcome is visible in-channel.
+ */
+export function buildSlipResolutionBlocks({ baseBlocks, resolutionText }) {
+  const withoutActions = baseBlocks.filter(b => b.type !== 'actions');
+  return [
+    ...withoutActions,
+    {
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: resolutionText }],
     },
   ];
 }
