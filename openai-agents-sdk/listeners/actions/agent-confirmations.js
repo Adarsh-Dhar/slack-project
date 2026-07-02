@@ -67,6 +67,7 @@ export function register(app) {
         launchDate: launch_date,
         pmUserId,
         tier,
+        githubRepo: null,
       });
 
       // Register sub-channels
@@ -91,7 +92,7 @@ export function register(app) {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       console.error('[create_launch_confirm] Error:', message);
-      await respond({ text: `❌ Error: ${message}` });
+      await respond({ text: `❌ ${message}` });
     }
   });
 

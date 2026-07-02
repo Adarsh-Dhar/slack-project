@@ -42,8 +42,13 @@ export async function handleMessage({ client, context, event, logger, say, saySt
     const threadTs = event.thread_ts || event.ts;
     const userId = /** @type {string} */ (context.userId);
 
-    // Get conversation history
-    const history = conversationStore.getHistory(channelId, threadTs);
+    logger.debug(`[message] Received | channel=${channelId} user=${userId} ts=${event.ts} isDm=${isDm} isThread=${isThreadReply}`);
+    logger.debug(`[message] Text: "${text.slice(0, 120)}"`);
+
+    // Get conversation history — keep last 6 items (~3 turns) to stay within token limits
+    const fullHistory = conversationStore.getHistory(channelId, threadTs);
+    const history = fullHistory ? fullHistory.slice(-6) : null;
+    logger.debug(`[message] History entries: ${fullHistory?.length ?? 0} (using last ${history?.length ?? 0})`);
 
     // Set assistant thread status with loading messages
     await setStatus({
@@ -65,18 +70,23 @@ export async function handleMessage({ client, context, event, logger, say, saySt
     const deps = new AgentDeps(client, userId, channelId, threadTs, event.ts, context.userToken);
     const result = await runAgent(inputItems, deps);
 
+    logger.debug(`[message] Agent returned, streaming reply | channel=${channelId}`);
+
     // Stream response in thread with feedback buttons
     const streamer = sayStream();
     await streamer.append({ markdown_text: result.finalOutput });
     const feedbackBlocks = buildFeedbackBlocks();
     await streamer.stop({ blocks: feedbackBlocks });
 
+    logger.debug(`[message] Reply streamed successfully | channel=${channelId}`);
+
     // Store conversation history
     conversationStore.setHistory(channelId, threadTs, result.history);
   } catch (e) {
-    logger.error(`Failed to handle message: ${e}`);
+    logger.error(`[message] ✖ Failed to handle message: ${e.message}`);
+    console.error('[message] stack:', e.stack);
     await say({
-      text: `:warning: Something went wrong! (${e})`,
+      text: `:warning: Something went wrong: ${e.message}`,
       thread_ts: event.thread_ts || event.ts,
     });
   }

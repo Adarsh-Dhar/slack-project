@@ -20,7 +20,7 @@ function slugify(name) {
 
 /**
  * Create a single Slack channel and set its purpose.
- * Returns the channel ID, or null if creation fails (e.g. name conflict).
+ * If the channel already exists (name_taken), joins it and returns its ID.
  */
 async function createChannel(client, name, purpose) {
   try {
@@ -34,11 +34,68 @@ async function createChannel(client, name, purpose) {
     return channelId;
   } catch (err) {
     const slackErr = err?.data;
-    // 'name_taken' means the channel already exists — surface clearly
+
     if (slackErr?.error === 'name_taken') {
-      console.warn(`[channelManager] Channel #${name} already exists, skipping creation.`);
-      return null;
+      console.warn(`[channelManager] #${name} already exists — attempting to look up and reuse it.`);
+
+      try {
+        // Try joining directly by name — works even on Enterprise Grid
+        // where conversations.list is restricted
+        const joinResult = await client.conversations.join({ channel: name }).catch(e => ({ error: e?.data?.error ?? e.message }));
+        if (joinResult?.channel?.id) {
+          console.log(`[channelManager] Joined existing #${name} (${joinResult.channel.id})`);
+          return joinResult.channel.id;
+        }
+
+        // Fall back: paginate conversations.list (works on standard workspaces)
+        for (const excludeArchived of [true, false]) {
+          let cursor;
+          do {
+            const list = await client.conversations.list({
+              exclude_archived: excludeArchived,
+              limit: 200,
+              ...(cursor ? { cursor } : {}),
+            }).catch(() => null);
+            if (!list) break;
+
+            const match = list.channels?.find(c => c.name === name);
+            if (match) {
+              if (match.is_archived) {
+                console.log(`[channelManager] #${name} (${match.id}) is archived — unarchiving...`);
+                const unarchiveResult = await client.conversations.unarchive({ channel: match.id })
+                  .catch(e => ({ ok: false, error: e?.data?.error ?? e.message }));
+
+                if (!unarchiveResult.ok) {
+                  // Bot can't unarchive (not_in_channel on EGrid) — surface a clear message
+                  console.error(`[channelManager] Cannot unarchive #${name}: ${unarchiveResult.error}`);
+                  throw new Error(
+                    `Channel #${name} exists but is archived, and the bot cannot unarchive it automatically.\n` +
+                    `Please unarchive it manually in Slack first: open the channel → More → Unarchive Channel.\n` +
+                    `Then click "Create Launch" again.`
+                  );
+                }
+
+                console.log(`[channelManager] Successfully unarchived #${name}`);
+                // Small delay to let Slack propagate the unarchive
+                await new Promise(r => setTimeout(r, 500));
+              }
+
+              console.log(`[channelManager] Reusing #${name} (${match.id})`);
+              await client.conversations.join({ channel: match.id }).catch(() => undefined);
+              return match.id;
+            }
+            cursor = list.response_metadata?.next_cursor;
+          } while (cursor);
+        }
+
+        console.warn(`[channelManager] #${name} could not be found — it may be deleted or inaccessible.`);
+        return null;
+      } catch (lookupErr) {
+        console.error(`[channelManager] Failed to look up #${name}:`, lookupErr.message);
+        return null;
+      }
     }
+
     throw err;
   }
 }
@@ -87,8 +144,8 @@ export async function createLaunchChannels(client, featureName, tier, initialUse
 
   if (!mainChannelId) {
     throw new Error(
-      `Could not create main channel #${mainName}. It may already exist. ` +
-      `Please rename your feature or archive the existing channel.`
+      `Could not create or find channel #${mainName}. ` +
+      `It may be archived — ask a workspace admin to unarchive it, or use a different feature name.`
     );
   }
 
