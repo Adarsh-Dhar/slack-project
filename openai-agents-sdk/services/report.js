@@ -99,6 +99,10 @@ export function buildLaunchReportBlocks(report) {
     blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Final retro outcome*\n${launch.outcome_summary}` } });
   }
 
+  if (launch.live_confirmed_at) {
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `✅ *Confirmed live* ${launch.live_confirmed_at} by <@${launch.live_confirmed_by}>` } });
+  }
+
   blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `Generated ${new Date().toISOString().slice(0, 10)}` }] });
 
   return blocks;

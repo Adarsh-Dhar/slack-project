@@ -152,3 +152,31 @@ export async function resolveOverride(client, input) {
 
   return override;
 }
+
+/**
+ * Re-send the override-prompt DM to every owner whose item is currently
+ * red. Used for on-demand chasing, separate from the automatic DM
+ * recordResponse sends the moment an item first goes red.
+ */
+export async function chaseRedItems(client, launch) {
+  const items = db.getItemsByLaunch(launch.id);
+  const responses = db.getGoNoGoResponses(launch.id);
+  const redItemIds = new Set(responses.filter(r => r.status === 'red').map(r => r.item_id));
+  const redItems = items.filter(i => redItemIds.has(i.id));
+
+  for (const item of redItems) {
+    const dmTarget = item.owner_id;
+    if (!dmTarget) continue;
+    await client.chat.postMessage({
+      channel: dmTarget,
+      text: `🔴 Reminder: *${item.title}* is still red on the *${launch.name}* Go/No-Go checklist.`,
+      blocks: buildOverridePromptBlocks({
+        itemTitle: item.title,
+        launchName: launch.name,
+        itemId: item.id,
+        launchId: launch.id,
+      }),
+    }).catch(err => console.error('[gonogo] Failed to re-DM red-item owner:', err.message));
+  }
+  return redItems.length;
+}

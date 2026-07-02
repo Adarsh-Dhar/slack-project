@@ -14,6 +14,11 @@ CREATE TABLE IF NOT EXISTS launches (
   outcome_summary     TEXT,        -- free text the PM fills in
   gonogo_posted_for   TEXT,        -- ISO date, set when the Go/No-Go canvas is posted (prevents re-posting same day)
   gonogo_message_ts   TEXT,        -- ts of the canvas message, so we can chat.update it as responses come in
+  gonogo_decision     TEXT CHECK (gonogo_decision IN ('go', 'no_go', 'hold')),
+  gonogo_decided_by   TEXT,
+  gonogo_decided_at   TEXT,
+  live_confirmed_at   TEXT,
+  live_confirmed_by   TEXT,
   created_at  TEXT DEFAULT (datetime('now'))
 );
 

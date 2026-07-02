@@ -16,6 +16,7 @@ import { setRiskItem, buildRiskBlocks } from '../services/risk.js';
 import { nudgeOwnerNow, escalateItemNow } from '../services/ownership.js';
 import { sendStandupForLaunch } from '../services/scheduler.js';
 import { getOpenPRs } from '../services/githubPRs.js';
+import { postGoNoGoCanvas, chaseRedItems, requestOverride } from '../services/gonogo.js';
 
 const SYSTEM_PROMPT = `\
 You are a friendly Slack assistant. You help people by answering questions, \
@@ -67,8 +68,15 @@ You have access to launch management tools for creating and managing product lau
 - \`get_legal_status\`: Check current legal/compliance sign-off checklist status for the launch in this channel.
 - \`get_slip_risk_status\`: List currently open/unresolved slip-risk alerts for the launch in this channel.
 - \`get_pr_status\`: Check currently open GitHub PRs for the launch (requires linked github_repo).
+- \`get_gonogo_status\`: Check current Go/No-Go readiness — green/red/pending counts per item, without posting the canvas.
+- \`trigger_gonogo_canvas\`: Post (or repost) the interactive Go/No-Go checklist canvas right now, instead of waiting for the T-48h cron.
+- \`chase_red_items\`: Immediately re-DM the owners of every currently-red Go/No-Go item.
+- \`request_gonogo_override\`: Submit an override request to the PM for a red Go/No-Go item. Does not approve — PM still clicks the button.
+- \`list_gonogo_overrides\`: List pending Go/No-Go override requests awaiting a PM decision.
+- \`record_gonogo_decision\`: Record the final Go/No-Go decision (go, no_go, or hold) and announce it. PM only.
+- \`confirm_feature_live\`: Mark the launch as confirmed live and announce it in the channel.
 
-\`get_launch_report\`, \`get_launch_portfolio\`, \`manage_kpi\`, \`open_feedback_prompt\`, \`get_live_metrics\`, \`manage_budget\`, \`manage_cs_readiness\`, \`manage_risk\`, \`nudge_owner\`, \`escalate_item\`, \`send_standup_now\`, \`manage_content_review\`, \`get_legal_status\`, \`get_slip_risk_status\`, and \`get_pr_status\` are safe, non-destructive reads/updates — call them directly, no confirmation button needed.
+\`get_launch_report\`, \`get_launch_portfolio\`, \`manage_kpi\`, \`open_feedback_prompt\`, \`get_live_metrics\`, \`manage_budget\`, \`manage_cs_readiness\`, \`manage_risk\`, \`nudge_owner\`, \`escalate_item\`, \`send_standup_now\`, \`manage_content_review\`, \`get_legal_status\`, \`get_slip_risk_status\`, \`get_pr_status\`, \`get_gonogo_status\`, \`trigger_gonogo_canvas\`, \`chase_red_items\`, \`request_gonogo_override\`, \`list_gonogo_overrides\`, \`record_gonogo_decision\`, and \`confirm_feature_live\` are safe, non-destructive reads/updates — call them directly, no confirmation button needed.
 
 For destructive or outbound actions (create_launch, trigger_retro, trigger_comms), always use the confirmation tools first — they post a button for the user to click before executing. This prevents accidental channel creation, archiving, or external sends.
 
@@ -981,6 +989,155 @@ const getPrStatus = tool({
   },
 });
 
+// ─── Go/No-Go tools ───────────────────────────────────────────────────────────
+
+const getGonogoStatus = tool({
+  name: 'get_gonogo_status',
+  description: 'Check current Go/No-Go readiness for the launch in this channel — green/red/pending counts per item, without posting the canvas.',
+  parameters: z.object({}),
+  execute: async (_args, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available.';
+    const launch = db.getLaunchByChannel(deps.channelId);
+    if (!launch) return 'No active launch found in this channel.';
+    const items = db.getItemsByLaunch(launch.id);
+    const responses = db.getGoNoGoResponses(launch.id);
+    const byItem = new Map(responses.map(r => [r.item_id, r.status]));
+    const lines = items.map(i => {
+      const status = byItem.get(i.id);
+      const emoji = status === 'green' ? '🟢' : status === 'red' ? '🔴' : '⚪';
+      return `${emoji} ${i.title}${i.owner_id ? ` (<@${i.owner_id}>)` : ''}`;
+    });
+    const redCount = [...byItem.values()].filter(s => s === 'red').length;
+    const pendingCount = items.length - responses.length;
+    const decisionLine = launch.gonogo_decision
+      ? `\nDecision: *${launch.gonogo_decision.toUpperCase()}* by <@${launch.gonogo_decided_by}>`
+      : '';
+    return `🚦 Go/No-Go for ${launch.name}: ${redCount} red, ${pendingCount} pending, ${items.length} total.${decisionLine}\n${lines.join('\n')}`;
+  },
+});
+
+const triggerGonogoCanvas = tool({
+  name: 'trigger_gonogo_canvas',
+  description: 'Post (or repost) the interactive Go/No-Go checklist canvas into this channel right now, instead of waiting for the T-48h automatic post.',
+  parameters: z.object({}),
+  execute: async (_args, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available.';
+    const launch = db.getLaunchByChannel(deps.channelId);
+    if (!launch) return 'No active launch found in this channel.';
+    await postGoNoGoCanvas(deps.client, launch);
+    return `Posted the Go/No-Go canvas for ${launch.name}.`;
+  },
+});
+
+const chaseRedGonogoItems = tool({
+  name: 'chase_red_items',
+  description: 'Immediately re-DM the owners of every currently-red Go/No-Go item for the launch in this channel.',
+  parameters: z.object({}),
+  execute: async (_args, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available.';
+    const launch = db.getLaunchByChannel(deps.channelId);
+    if (!launch) return 'No active launch found in this channel.';
+    const count = await chaseRedItems(deps.client, launch);
+    if (count === 0) return `No red items to chase for ${launch.name}. ✅`;
+    return `Re-nudged owners of ${count} red item(s) for ${launch.name}.`;
+  },
+});
+
+const requestGonogoOverride = tool({
+  name: 'request_gonogo_override',
+  description: 'Submit an override request to the PM for a red Go/No-Go item, so it can ship despite not being green. Does not approve it — the PM still clicks the button.',
+  parameters: z.object({
+    item_title: z.string().describe('The checklist item to request an override for.'),
+    reason: z.string().nullable().describe('Optional reason for the override request.'),
+  }),
+  execute: async ({ item_title, reason }, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available.';
+    const launch = db.getLaunchByChannel(deps.channelId);
+    if (!launch) return 'No active launch found in this channel.';
+    const item = db.getItemsByLaunch(launch.id).find(
+      i => i.title.toLowerCase().includes(item_title.toLowerCase())
+    );
+    if (!item) return `No item matching "${item_title}" found.`;
+    await requestOverride(deps.client, {
+      itemId: item.id, launchId: launch.id,
+      requestedBy: deps.userId, reason: reason ?? null,
+    });
+    return `Sent an override request for "${item.title}" to <@${launch.pm_user_id}>.`;
+  },
+});
+
+const listGonogoOverrides = tool({
+  name: 'list_gonogo_overrides',
+  description: 'List pending Go/No-Go override requests awaiting a PM decision for the launch in this channel.',
+  parameters: z.object({}),
+  execute: async (_args, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available.';
+    const launch = db.getLaunchByChannel(deps.channelId);
+    if (!launch) return 'No active launch found in this channel.';
+    const pending = db.getPendingOverridesForLaunch(launch.id);
+    if (pending.length === 0) return `No pending overrides for ${launch.name}.`;
+    const items = db.getItemsByLaunch(launch.id);
+    return pending.map(o => {
+      const item = items.find(i => i.id === o.item_id);
+      return `• *${item?.title ?? o.item_id}* — requested by <@${o.requested_by}>${o.reason ? `: ${o.reason}` : ''} (id: ${o.id})`;
+    }).join('\n');
+  },
+});
+
+const recordGonogoDecisionTool = tool({
+  name: 'record_gonogo_decision',
+  description: 'Record the final Go/No-Go decision (go, no_go, or hold) for the launch in this channel and announce it. Only the PM should be making this call.',
+  parameters: z.object({
+    decision: z.enum(['go', 'no_go', 'hold']),
+    share_to_leadership: z.boolean().describe('Set true to also post to the leadership channel.'),
+  }),
+  execute: async ({ decision, share_to_leadership }, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available.';
+    const launch = db.getLaunchByChannel(deps.channelId);
+    if (!launch) return 'No active launch found in this channel.';
+    if (deps.userId !== launch.pm_user_id) {
+      return `Only <@${launch.pm_user_id}> (the launch PM) can record the final Go/No-Go decision.`;
+    }
+    db.recordGonogoDecision({ launchId: launch.id, decision, decidedBy: deps.userId });
+    const emoji = { go: '🟢', no_go: '🔴', hold: '🟡' }[decision];
+    const text = `${emoji} *Go/No-Go decision for ${launch.name}: ${decision.toUpperCase()}* — called by <@${deps.userId}>`;
+    await deps.client.chat.postMessage({ channel: deps.channelId, text });
+    if (share_to_leadership && config.LEADERSHIP_CHANNEL_ID) {
+      await deps.client.chat.postMessage({ channel: config.LEADERSHIP_CHANNEL_ID, text })
+        .catch(err => console.error('[record_gonogo_decision] leadership post failed:', err.message));
+    }
+    return `Recorded and announced: ${decision.toUpperCase()}.`;
+  },
+});
+
+const confirmFeatureLive = tool({
+  name: 'confirm_feature_live',
+  description: 'Mark the launch in this channel as confirmed live and announce it in the channel (and optionally to leadership). Use when someone explicitly confirms the feature has shipped and is working.',
+  parameters: z.object({
+    share_to_leadership: z.boolean().describe('Set true to also post the announcement to the leadership channel.'),
+  }),
+  execute: async ({ share_to_leadership }, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available.';
+    const launch = db.getLaunchByChannel(deps.channelId);
+    if (!launch) return 'No active launch found in this channel.';
+    db.confirmLaunchLive({ launchId: launch.id, confirmedBy: deps.userId });
+    const text = `🚀 *${launch.name} is live!* Confirmed by <@${deps.userId}>.`;
+    await deps.client.chat.postMessage({ channel: deps.channelId, text });
+    if (share_to_leadership && config.LEADERSHIP_CHANNEL_ID) {
+      await deps.client.chat.postMessage({ channel: config.LEADERSHIP_CHANNEL_ID, text })
+        .catch(err => console.error('[confirm_feature_live] leadership post failed:', err.message));
+    }
+    return `Marked ${launch.name} as live and announced it.`;
+  },
+});
+
 export const starterAgent = new Agent({
   name: 'Starter Agent',
   instructions: SYSTEM_PROMPT,
@@ -1007,6 +1164,13 @@ export const starterAgent = new Agent({
     manageContentReview,
     getLegalStatus,
     getPrStatus,
+    getGonogoStatus,
+    triggerGonogoCanvas,
+    chaseRedGonogoItems,
+    requestGonogoOverride,
+    listGonogoOverrides,
+    recordGonogoDecisionTool,
+    confirmFeatureLive,
   ],
   model: new OpenAIChatCompletionsModel(githubModelsClient, 'openai/gpt-4o-mini'),
 });

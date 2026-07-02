@@ -519,3 +519,25 @@ export function getOpenSlipEvents(launchId) {
     `SELECT * FROM slip_events WHERE launch_id = ? AND status IN ('pending','confirmed','explaining') ORDER BY created_at DESC`
   ).all(launchId);
 }
+
+// ─── Go/No-Go decision + override helpers ────────────────────────────────────
+
+export function getPendingOverridesForLaunch(launchId) {
+  return db.prepare(
+    `SELECT * FROM gonogo_overrides WHERE launch_id = ? AND status = 'pending' ORDER BY created_at ASC`
+  ).all(launchId);
+}
+
+export function recordGonogoDecision({ launchId, decision, decidedBy }) {
+  db.prepare(
+    `UPDATE launches SET gonogo_decision = ?, gonogo_decided_by = ?, gonogo_decided_at = datetime('now') WHERE id = ?`
+  ).run(decision, decidedBy, launchId);
+}
+
+// ─── Confirm live helper ──────────────────────────────────────────────────────
+
+export function confirmLaunchLive({ launchId, confirmedBy }) {
+  db.prepare(
+    `UPDATE launches SET live_confirmed_at = datetime('now'), live_confirmed_by = ? WHERE id = ?`
+  ).run(confirmedBy, launchId);
+}

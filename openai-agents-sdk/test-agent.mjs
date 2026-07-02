@@ -261,6 +261,51 @@ sep('TEST 16 — escalate_item: "escalate feature flag item"');
   console.log(`  📬 Messages posted: ${client.posted.length}`);
 }
 
+// ─── Test 17: get_gonogo_status ───────────────────────────────────────────────
+sep('TEST 17 — get_gonogo_status: "what is the go/no-go status?"');
+{
+  const client = makeMockClient();
+  const deps = new AgentDeps(client, PM_USER, LAUNCH_CHANNEL, '17', '17');
+
+  const result = await runAgent('what is the go/no-go status for this launch?', deps);
+  console.log('\n  🤖 Agent reply:\n ', result.finalOutput ?? '(no text reply)');
+}
+
+// ─── Test 18: trigger_gonogo_canvas ──────────────────────────────────────────
+sep('TEST 18 — trigger_gonogo_canvas: "post the go/no-go canvas now"');
+{
+  const client = makeMockClient();
+  const deps = new AgentDeps(client, PM_USER, LAUNCH_CHANNEL, '18', '18');
+
+  const result = await runAgent('post the go/no-go checklist canvas for this launch right now', deps);
+  console.log('\n  🤖 Agent reply:\n ', result.finalOutput ?? '(no text reply)');
+  console.log(`  📬 Messages posted: ${client.posted.length}`);
+}
+
+// ─── Test 19: confirm_feature_live ───────────────────────────────────────────
+sep('TEST 19 — confirm_feature_live: "the feature is live!"');
+{
+  const client = makeMockClient();
+  const deps = new AgentDeps(client, PM_USER, LAUNCH_CHANNEL, '19', '19');
+
+  const result = await runAgent('the feature is live, please confirm and announce it', deps);
+  console.log('\n  🤖 Agent reply:\n ', result.finalOutput ?? '(no text reply)');
+  console.log(`  📬 Messages posted: ${client.posted.length}`);
+  if (client.posted.length > 0) console.log('  Announcement text:', client.posted[0].text);
+}
+
+// ─── Test 20: record_gonogo_decision (PM check) ───────────────────────────────
+sep('TEST 20 — record_gonogo_decision: "we are go for launch"');
+{
+  const client = makeMockClient();
+  // Use the real PM user ID — the tool enforces userId === pm_user_id
+  const deps = new AgentDeps(client, PM_USER, LAUNCH_CHANNEL, '20', '20');
+
+  const result = await runAgent('we are go for launch, record the go/no-go decision', deps);
+  console.log('\n  🤖 Agent reply:\n ', result.finalOutput ?? '(no text reply)');
+  console.log(`  📬 Messages posted: ${client.posted.length}`);
+}
+
 // ─── Summary ──────────────────────────────────────────────────────────────────
 console.log(`\n${'═'.repeat(64)}`);
 console.log('All tests complete. Check tool calls logged above.');
