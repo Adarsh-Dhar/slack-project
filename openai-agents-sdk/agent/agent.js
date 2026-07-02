@@ -12,6 +12,10 @@ import { triggerComms } from '../services/comms.js';
 import { getLiveMetrics } from '../services/monitoring.js';
 import { defineBudgetItem, updateSpend, buildBudgetListBlocks } from '../services/budget.js';
 import { setCsReadinessItem, buildCsReadinessBlocks } from '../services/csReadiness.js';
+import { setRiskItem, buildRiskBlocks } from '../services/risk.js';
+import { nudgeOwnerNow, escalateItemNow } from '../services/ownership.js';
+import { sendStandupForLaunch } from '../services/scheduler.js';
+import { getOpenPRs } from '../services/githubPRs.js';
 
 const SYSTEM_PROMPT = `\
 You are a friendly Slack assistant. You help people by answering questions, \
@@ -54,8 +58,17 @@ You have access to launch management tools for creating and managing product lau
 - \`get_live_metrics\`: Fetch current error rate / key metrics for the launch from the monitoring provider.
 - \`manage_budget\`: Define, update, or list budget/spend for the launch in this channel.
 - \`manage_cs_readiness\`: Track CS/support readiness items (FAQ docs, macros, escalation paths) for the launch in this channel.
+- \`manage_risk\`: Log or list risk assessments (technical, legal, market_timing, other) for the launch. action="set" to record, action="list" to show.
+- \`request_budget_approval\`: Send a budget category to the launch PM for approve/reject sign-off.
+- \`nudge_owner\`: Send an immediate reminder DM to whoever owns a specific open checklist item.
+- \`escalate_item\`: Post an escalation to the launch channel tagging the PM about a stuck checklist item.
+- \`send_standup_now\`: Immediately send daily check-in DMs to every item owner instead of waiting for the 9am cron.
+- \`manage_content_review\`: Submit marketing/docs/sales copy for review (action="submit"), or list current review status (action="list").
+- \`get_legal_status\`: Check current legal/compliance sign-off checklist status for the launch in this channel.
+- \`get_slip_risk_status\`: List currently open/unresolved slip-risk alerts for the launch in this channel.
+- \`get_pr_status\`: Check currently open GitHub PRs for the launch (requires linked github_repo).
 
-\`get_launch_report\`, \`get_launch_portfolio\`, \`manage_kpi\`, \`open_feedback_prompt\`, \`get_live_metrics\`, \`manage_budget\`, and \`manage_cs_readiness\` are safe, non-destructive reads/updates — call them directly, no confirmation button needed.
+\`get_launch_report\`, \`get_launch_portfolio\`, \`manage_kpi\`, \`open_feedback_prompt\`, \`get_live_metrics\`, \`manage_budget\`, \`manage_cs_readiness\`, \`manage_risk\`, \`nudge_owner\`, \`escalate_item\`, \`send_standup_now\`, \`manage_content_review\`, \`get_legal_status\`, \`get_slip_risk_status\`, and \`get_pr_status\` are safe, non-destructive reads/updates — call them directly, no confirmation button needed.
 
 For destructive or outbound actions (create_launch, trigger_retro, trigger_comms), always use the confirmation tools first — they post a button for the user to click before executing. This prevents accidental channel creation, archiving, or external sends.
 
@@ -562,33 +575,25 @@ const openFeedbackPrompt = tool({
   execute: async (_args, context) => {
     const deps = context?.context;
     if (!deps) return 'No deps available to post the feedback prompt.';
-
     try {
       const launch = db.getLaunchByChannel(deps.channelId);
       if (!launch) return 'No active launch found in this channel.';
-
       await deps.client.chat.postMessage({
         channel: deps.channelId,
         text: `💬 Add feedback for ${launch.name}`,
         blocks: [
-          {
-            type: 'section',
-            text: { type: 'mrkdwn', text: `💬 *Add feedback for ${launch.name}*` },
-          },
+          { type: 'section', text: { type: 'mrkdwn', text: `💬 *Add feedback for ${launch.name}*` } },
           {
             type: 'actions',
-            elements: [
-              {
-                type: 'button',
-                text: { type: 'plain_text', text: '💬 Add Feedback', emoji: true },
-                action_id: 'feedback_add',
-                value: String(launch.id),
-              },
-            ],
+            elements: [{
+              type: 'button',
+              text: { type: 'plain_text', text: '💬 Add Feedback', emoji: true },
+              action_id: 'feedback_add',
+              value: String(launch.id),
+            }],
           },
         ],
       });
-
       return `Posted a feedback button for ${launch.name}.`;
     } catch (e) {
       const err = /** @type {any} */ (e);
@@ -609,19 +614,14 @@ const triggerCommsConfirmation = tool({
   execute: async ({ channel, message }, context) => {
     const deps = context?.context;
     if (!deps) return 'No deps available to post confirmation.';
-
     try {
       const launch = db.getLaunchByChannel(deps.channelId);
       if (!launch) return 'No active launch found in this channel.';
-
       await deps.client.chat.postMessage({
         channel: deps.channelId,
         text: `📣 Send ${channel} comms for ${launch.name}?`,
         blocks: [
-          {
-            type: 'section',
-            text: { type: 'mrkdwn', text: `📣 *Send ${channel} comms for ${launch.name}?*\n\n>${message}` },
-          },
+          { type: 'section', text: { type: 'mrkdwn', text: `📣 *Send ${channel} comms for ${launch.name}?*\n\n>${message}` } },
           {
             type: 'actions',
             block_id: 'trigger_comms_confirm',
@@ -652,11 +652,9 @@ const getLiveMetricsTool = tool({
   execute: async (_args, context) => {
     const deps = context?.context;
     if (!deps) return 'No deps available to fetch metrics.';
-
     try {
       const launch = db.getLaunchByChannel(deps.channelId);
       if (!launch) return 'No active launch found in this channel.';
-
       const metrics = await getLiveMetrics(launch.name);
       return `📈 Live metrics for ${launch.name}: ${JSON.stringify(metrics, null, 2)}`;
     } catch (e) {
@@ -681,11 +679,9 @@ const manageBudget = tool({
   execute: async ({ action, category, approved_amount, approver, spent_amount }, context) => {
     const deps = context?.context;
     if (!deps) return 'No deps available to manage budget.';
-
     try {
       const launch = db.getLaunchByChannel(deps.channelId);
       if (!launch) return 'No active launch found in this channel.';
-
       if (action === 'list') {
         const blocks = buildBudgetListBlocks(launch.id, launch.name);
         await deps.client.chat.postMessage({ channel: deps.channelId, text: `Budget for ${launch.name}`, blocks });
@@ -723,11 +719,9 @@ const manageCsReadiness = tool({
   execute: async ({ action, item, link, status }, context) => {
     const deps = context?.context;
     if (!deps) return 'No deps available to manage CS readiness.';
-
     try {
       const launch = db.getLaunchByChannel(deps.channelId);
       if (!launch) return 'No active launch found in this channel.';
-
       if (action === 'list') {
         const blocks = buildCsReadinessBlocks(launch.id, launch.name);
         await deps.client.chat.postMessage({ channel: deps.channelId, text: `CS readiness for ${launch.name}`, blocks });
@@ -742,6 +736,247 @@ const manageCsReadiness = tool({
     } catch (e) {
       const err = /** @type {any} */ (e);
       return `Error managing CS readiness: ${err.message}`;
+    }
+  },
+});
+
+// ─── #1 Risk tool ─────────────────────────────────────────────────────────────
+
+const manageRisk = tool({
+  name: 'manage_risk',
+  description: 'Log or list risk assessments (technical, legal, market_timing, other) for the launch in this channel. Use action="set" to record/update a risk level and optional note, action="list" to show all logged risks.',
+  parameters: z.object({
+    action: z.enum(['set', 'list']),
+    category: z.enum(['technical', 'legal', 'market_timing', 'other']).nullable()
+      .describe('Required for action="set".'),
+    level: z.enum(['low', 'medium', 'high']).nullable()
+      .describe('Required for action="set".'),
+    note: z.string().nullable().describe('Optional note explaining the risk.'),
+  }),
+  execute: async ({ action, category, level, note }, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available to manage risk.';
+    const launch = db.getLaunchByChannel(deps.channelId);
+    if (!launch) return 'No active launch found in this channel.';
+
+    if (action === 'list') {
+      const blocks = buildRiskBlocks(launch.id, launch.name);
+      await deps.client.chat.postMessage({ channel: deps.channelId, text: `Risk assessment for ${launch.name}`, blocks });
+      return `Posted the current risk assessment for ${launch.name}.`;
+    }
+    if (!category || !level) return 'A category and level are required to log a risk.';
+    setRiskItem({ launchId: launch.id, category, level, note: note ?? null, updatedBy: deps.userId });
+    return `Logged ${level} ${category} risk${note ? `: ${note}` : ''}.`;
+  },
+});
+
+// ─── #2 Budget approval tool ──────────────────────────────────────────────────
+
+const requestBudgetApproval = tool({
+  name: 'request_budget_approval',
+  description: 'Send a budget category to the launch PM for approve/reject sign-off. The category must already exist — use manage_budget action="set" first if not.',
+  parameters: z.object({
+    category: z.string().describe('The budget category to send for approval, e.g. "Paid social ads".'),
+  }),
+  execute: async ({ category }, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available to request approval.';
+    const launch = db.getLaunchByChannel(deps.channelId);
+    if (!launch) return 'No active launch found in this channel.';
+    const item = db.getBudgetForLaunch(launch.id).find(b => b.category === category);
+    if (!item) return `No budget category "${category}" found. Define it first with manage_budget action="set".`;
+
+    await deps.client.chat.postMessage({
+      channel: launch.pm_user_id,
+      text: `💰 Approve budget for ${launch.name}?`,
+      blocks: [
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: `💰 *Approve "${category}" for ${launch.name}?*\n\nRequested amount: ${item.approved_amount ?? '—'}` },
+        },
+        {
+          type: 'actions',
+          elements: [
+            { type: 'button', text: { type: 'plain_text', text: '✅ Approve' }, style: 'primary', action_id: 'budget_approve', value: JSON.stringify({ launchId: launch.id, category }) },
+            { type: 'button', text: { type: 'plain_text', text: '❌ Reject' }, style: 'danger', action_id: 'budget_reject', value: JSON.stringify({ launchId: launch.id, category }) },
+          ],
+        },
+      ],
+    });
+    return `Sent "${category}" to <@${launch.pm_user_id}> for approval.`;
+  },
+});
+
+// ─── #3 Nudge owner tool ──────────────────────────────────────────────────────
+
+const nudgeOwnerTool = tool({
+  name: 'nudge_owner',
+  description: 'Send an immediate reminder DM to whoever owns a specific open checklist item for the launch in this channel.',
+  parameters: z.object({
+    item_title: z.string().describe('The checklist item title, or a close match to it.'),
+  }),
+  execute: async ({ item_title }, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available to nudge owner.';
+    const launch = db.getLaunchByChannel(deps.channelId);
+    if (!launch) return 'No active launch found in this channel.';
+    const items = db.getItemsByLaunch(launch.id);
+    const item = items.find(
+      i => i.title.toLowerCase().includes(item_title.toLowerCase()) && i.owner_id && i.status !== 'done'
+    );
+    if (!item) return `No open item matching "${item_title}" with an assigned owner was found.`;
+    await nudgeOwnerNow(deps.client, { item, launch });
+    return `Nudged <@${item.owner_id}> about "${item.title}".`;
+  },
+});
+
+// ─── #4 Slip risk status tool ─────────────────────────────────────────────────
+
+const getSlipRiskStatus = tool({
+  name: 'get_slip_risk_status',
+  description: 'List currently open/unresolved slip-risk alerts for the launch in this channel.',
+  parameters: z.object({}),
+  execute: async (_args, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available.';
+    const launch = db.getLaunchByChannel(deps.channelId);
+    if (!launch) return 'No active launch found in this channel.';
+    const events = db.getOpenSlipEvents(launch.id);
+    if (events.length === 0) return `No open slip-risk alerts for ${launch.name}. ✅`;
+    return `⚠️ ${events.length} open slip-risk alert(s) for ${launch.name}:\n` +
+      events.map(e => `• <@${e.detected_user_id}>: "${e.message_text?.slice(0, 100)}" (${e.status})`).join('\n');
+  },
+});
+
+// ─── #5 Escalate item tool ────────────────────────────────────────────────────
+
+const escalateItemTool = tool({
+  name: 'escalate_item',
+  description: 'Immediately post an escalation to the launch channel, tagging the PM, about a specific stuck checklist item.',
+  parameters: z.object({
+    item_title: z.string().describe('The checklist item title to escalate.'),
+  }),
+  execute: async ({ item_title }, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available to escalate.';
+    const launch = db.getLaunchByChannel(deps.channelId);
+    if (!launch) return 'No active launch found in this channel.';
+    const item = db.getItemsByLaunch(launch.id).find(
+      i => i.title.toLowerCase().includes(item_title.toLowerCase()) && i.status !== 'done'
+    );
+    if (!item) return `No open item matching "${item_title}" found.`;
+    await escalateItemNow(deps.client, { item, launch, escalatedBy: deps.userId });
+    return `Escalated "${item.title}" in the launch channel.`;
+  },
+});
+
+// ─── #6 Send standup now tool ─────────────────────────────────────────────────
+
+const sendStandupNow = tool({
+  name: 'send_standup_now',
+  description: 'Immediately send daily check-in DMs to every item owner for the launch in this channel, instead of waiting for the 9am cron.',
+  parameters: z.object({}),
+  execute: async (_args, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available to send standups.';
+    const launch = db.getLaunchByChannel(deps.channelId);
+    if (!launch) return 'No active launch found in this channel.';
+    const count = await sendStandupForLaunch(deps.client, launch);
+    return `Sent standup check-ins to ${count} owner(s) for ${launch.name}.`;
+  },
+});
+
+// ─── #7 Content review tool ───────────────────────────────────────────────────
+
+const manageContentReview = tool({
+  name: 'manage_content_review',
+  description: 'Submit marketing/docs/sales copy for review (action="submit"), or list current review status (action="list") for the launch in this channel.',
+  parameters: z.object({
+    action: z.enum(['submit', 'list']),
+    content_type: z.enum(['marketing', 'docs', 'sales']).nullable()
+      .describe('Required for action="submit".'),
+    link: z.string().nullable().describe('Link to the doc/draft being reviewed. Required for action="submit".'),
+  }),
+  execute: async ({ action, content_type, link }, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available to manage content review.';
+    const launch = db.getLaunchByChannel(deps.channelId);
+    if (!launch) return 'No active launch found in this channel.';
+
+    if (action === 'list') {
+      const reviews = db.getContentReviews(launch.id);
+      if (reviews.length === 0) return `No content submitted for review yet on ${launch.name}.`;
+      return reviews
+        .map(r => `• *${r.content_type}:* ${r.status}${r.link ? ` (<${r.link}|link>)` : ''}`)
+        .join('\n');
+    }
+    if (!content_type || !link) return 'A content type and link are required to submit for review.';
+    db.submitContentForReview({ launchId: launch.id, contentType: content_type, link, submittedBy: deps.userId });
+    await deps.client.chat.postMessage({
+      channel: launch.pm_user_id,
+      text: `📝 Review requested: ${content_type} for ${launch.name}`,
+      blocks: [
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: `📝 *${content_type} copy ready for review* — ${launch.name}\n<${link}|View draft>` },
+        },
+        {
+          type: 'actions',
+          elements: [
+            { type: 'button', text: { type: 'plain_text', text: '✅ Approve' }, style: 'primary', action_id: 'content_approve', value: JSON.stringify({ launchId: launch.id, contentType: content_type }) },
+            { type: 'button', text: { type: 'plain_text', text: '✏️ Request changes' }, action_id: 'content_changes', value: JSON.stringify({ launchId: launch.id, contentType: content_type }) },
+          ],
+        },
+      ],
+    });
+    return `Submitted ${content_type} copy for review and notified <@${launch.pm_user_id}>.`;
+  },
+});
+
+// ─── #8 Legal status tool ─────────────────────────────────────────────────────
+
+const getLegalStatus = tool({
+  name: 'get_legal_status',
+  description: 'Check current legal/compliance sign-off checklist status for the launch in this channel.',
+  parameters: z.object({}),
+  execute: async (_args, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available.';
+    const launch = db.getLaunchByChannel(deps.channelId);
+    if (!launch) return 'No active launch found in this channel.';
+    const legalItems = db.getItemsByLaunch(launch.id).filter(i => i.team === 'legal');
+    if (legalItems.length === 0) return `No legal checklist items tracked for ${launch.name}.`;
+    const now = new Date();
+    const lines = legalItems.map(i => {
+      const overdue = i.status !== 'done' && i.due_date && new Date(i.due_date) < now;
+      const icon = i.status === 'done' ? '✅' : overdue ? '🔴' : '⏳';
+      return `${icon} ${i.title}${overdue ? ' *(overdue)*' : ''}`;
+    });
+    return `⚖️ Legal status for ${launch.name}:\n${lines.join('\n')}`;
+  },
+});
+
+// ─── #9 PR status tool ────────────────────────────────────────────────────────
+
+const getPrStatus = tool({
+  name: 'get_pr_status',
+  description: 'Check currently open GitHub PRs for the launch in this channel. Requires the launch to have a linked github_repo.',
+  parameters: z.object({}),
+  execute: async (_args, context) => {
+    const deps = context?.context;
+    if (!deps) return 'No deps available.';
+    const launch = db.getLaunchByChannel(deps.channelId);
+    if (!launch) return 'No active launch found in this channel.';
+    if (!launch.github_repo) return `${launch.name} has no linked GitHub repo.`;
+    const [owner, repo] = launch.github_repo.split('/');
+    try {
+      const prs = await getOpenPRs(owner, repo);
+      if (prs.length === 0) return `✅ No open PRs on \`${launch.github_repo}\`.`;
+      return `🚨 ${prs.length} open PR(s) on \`${launch.github_repo}\`:\n` +
+        prs.map(pr => `• <${pr.html_url}|#${pr.number} ${pr.title}>`).join('\n');
+    } catch (e) {
+      const err = /** @type {any} */ (e);
+      return `Error checking PRs: ${err.message}`;
     }
   },
 });
@@ -763,6 +998,15 @@ export const starterAgent = new Agent({
     getLiveMetricsTool,
     manageBudget,
     manageCsReadiness,
+    manageRisk,
+    requestBudgetApproval,
+    nudgeOwnerTool,
+    getSlipRiskStatus,
+    escalateItemTool,
+    sendStandupNow,
+    manageContentReview,
+    getLegalStatus,
+    getPrStatus,
   ],
   model: new OpenAIChatCompletionsModel(githubModelsClient, 'openai/gpt-4o-mini'),
 });

@@ -193,6 +193,74 @@ sep('TEST 10 — trigger_comms_confirmation: "send a social post"');
   console.log(`  📬 Messages posted: ${client.posted.length}`);
 }
 
+// ─── Test 11: manage_risk (new #1) ───────────────────────────────────────────
+sep('TEST 11 — manage_risk: "log a high technical risk: DB migration not tested"');
+{
+  const client = makeMockClient();
+  const deps = new AgentDeps(client, PM_USER, LAUNCH_CHANNEL, '11', '11');
+
+  const result = await runAgent(
+    'log a high technical risk for this launch: DB migration not tested in staging',
+    deps
+  );
+  console.log('\n  🤖 Agent reply:\n ', result.finalOutput ?? '(no text reply)');
+}
+
+// ─── Test 12: get_slip_risk_status (new #4) ──────────────────────────────────
+sep('TEST 12 — get_slip_risk_status: "any open slip alerts?"');
+{
+  const client = makeMockClient();
+  const deps = new AgentDeps(client, PM_USER, LAUNCH_CHANNEL, '12', '12');
+
+  const result = await runAgent('are there any open slip risk alerts for this launch?', deps);
+  console.log('\n  🤖 Agent reply:\n ', result.finalOutput ?? '(no text reply)');
+}
+
+// ─── Test 13: get_legal_status (new #8) ──────────────────────────────────────
+sep('TEST 13 — get_legal_status: "what is the legal sign-off status?"');
+{
+  const client = makeMockClient();
+  const deps = new AgentDeps(client, PM_USER, LAUNCH_CHANNEL, '13', '13');
+
+  const result = await runAgent('what is the legal sign-off status for this launch?', deps);
+  console.log('\n  🤖 Agent reply:\n ', result.finalOutput ?? '(no text reply)');
+}
+
+// ─── Test 14: get_pr_status (new #9) ─────────────────────────────────────────
+sep('TEST 14 — get_pr_status: "any open PRs?"');
+{
+  const client = makeMockClient();
+  const deps = new AgentDeps(client, PM_USER, LAUNCH_CHANNEL, '14', '14');
+
+  const result = await runAgent('are there any open PRs for this launch?', deps);
+  console.log('\n  🤖 Agent reply:\n ', result.finalOutput ?? '(no text reply)');
+}
+
+// ─── Test 15: manage_content_review submit (new #7) ──────────────────────────
+sep('TEST 15 — manage_content_review: "submit marketing copy for review"');
+{
+  const client = makeMockClient();
+  const deps = new AgentDeps(client, PM_USER, LAUNCH_CHANNEL, '15', '15');
+
+  const result = await runAgent(
+    'submit marketing copy for review, the draft is at https://docs.example.com/draft',
+    deps
+  );
+  console.log('\n  🤖 Agent reply:\n ', result.finalOutput ?? '(no text reply)');
+  console.log(`  📬 Messages posted: ${client.posted.length}`);
+}
+
+// ─── Test 16: escalate_item (new #5) ─────────────────────────────────────────
+sep('TEST 16 — escalate_item: "escalate feature flag item"');
+{
+  const client = makeMockClient();
+  const deps = new AgentDeps(client, PM_USER, LAUNCH_CHANNEL, '16', '16');
+
+  const result = await runAgent('escalate the "Feature flag enabled" item for this launch', deps);
+  console.log('\n  🤖 Agent reply:\n ', result.finalOutput ?? '(no text reply)');
+  console.log(`  📬 Messages posted: ${client.posted.length}`);
+}
+
 // ─── Summary ──────────────────────────────────────────────────────────────────
 console.log(`\n${'═'.repeat(64)}`);
 console.log('All tests complete. Check tool calls logged above.');

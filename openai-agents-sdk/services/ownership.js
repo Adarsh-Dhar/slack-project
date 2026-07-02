@@ -1,6 +1,8 @@
 // services/ownership.js
 // @ts-nocheck
 
+import * as db from '../db/index.js';
+
 export async function notifyItemOwner(client, input) {
   const { ownerId, itemTitle, launchName, launchDate, dueDate } = input;
   const due = dueDate ? ` by *${dueDate}*` : '';
@@ -31,5 +33,26 @@ export async function postOwnershipSummary(client, launchChannelId, items) {
   await client.chat.postMessage({
     channel: launchChannelId,
     text: `📋 *Ownership assignments:*\n\n${lines.join('\n')}`,
+  });
+}
+
+/**
+ * Immediately DM an item owner as a targeted nudge (not the 24h SLA batch).
+ */
+export async function nudgeOwnerNow(client, { item, launch }) {
+  await client.chat.postMessage({
+    channel: item.owner_id,
+    text: `👋 Nudge from <@${launch.pm_user_id}>: *${item.title}* for *${launch.name}* still needs an update.`,
+  });
+  db.markItemNotified(item.id);
+}
+
+/**
+ * Post an immediate escalation to the launch channel tagging the PM.
+ */
+export async function escalateItemNow(client, { item, launch, escalatedBy }) {
+  await client.chat.postMessage({
+    channel: launch.channel_id,
+    text: `🔁 <@${launch.pm_user_id}> — escalated by <@${escalatedBy}>: <@${item.owner_id}> hasn't completed *${item.title}*.`,
   });
 }

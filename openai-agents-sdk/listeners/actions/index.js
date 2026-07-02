@@ -6,6 +6,8 @@ import * as slipActions from './slip-actions.js';
 import * as gonogoActions from './gonogo-actions.js';
 import * as launchFeedbackActions from './launch-feedback-actions.js';
 import * as commsActions from './comms-actions.js';
+import * as budgetActions from './budget-actions.js';
+import * as contentReviewActions from './content-review-actions.js';
 
 /**
  * Register action listeners with the Bolt app.
@@ -21,4 +23,6 @@ export function register(app) {
   gonogoActions.register(app);
   launchFeedbackActions.register(app);
   commsActions.register(app);
+  budgetActions.register(app);
+  contentReviewActions.register(app);
 }

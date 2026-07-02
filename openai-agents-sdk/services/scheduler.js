@@ -22,6 +22,60 @@ let prCheckTask = null;
 let gonogoCheckTask = null;
 let deadlineCheckTask = null;
 
+// ─── Reusable job bodies (also called directly by agent tools) ────────────────
+
+/**
+ * Send standup DMs for a single launch. Returns the number of DMs sent.
+ * @param {import('@slack/web-api').WebClient} client
+ * @param {object} launch
+ */
+export async function sendStandupForLaunch(client, launch) {
+  const items = db.getItemsByLaunch(launch.id).filter(i => i.status !== 'done' && i.owner_id);
+  const byOwner = new Map();
+  for (const item of items) {
+    const existing = byOwner.get(item.owner_id) ?? [];
+    byOwner.set(item.owner_id, [...existing, item]);
+  }
+  let sent = 0;
+  for (const [ownerId, ownerItems] of byOwner.entries()) {
+    const topItem = ownerItems[0];
+    await client.chat.postMessage({
+      channel: ownerId,
+      text: `Daily check-in for ${launch.name}`,
+      blocks: buildStandupBlocks({
+        itemTitle: topItem.title, launchName: launch.name, launchDate: launch.launch_date,
+        itemId: topItem.id, launchId: launch.id,
+      }),
+    }).catch(err => console.error(`[Standup] DM failed for ${ownerId}:`, err.message));
+    sent++;
+  }
+  return sent;
+}
+
+/**
+ * Run the 24h SLA nudge pass across all stale items. Returns the count.
+ * @param {import('@slack/web-api').WebClient} client
+ */
+export async function runSlaCheck(client) {
+  const stale = db.getStaleItems(24);
+  for (const item of stale) {
+    const launch = db.getLaunchById(item.launch_id);
+    if (!launch) continue;
+    await client.chat.postMessage({
+      channel: item.owner_id,
+      text: `⏰ Reminder: *${item.title}* for *${launch.name}* still needs an update (no reply in 24h+).`,
+    }).catch(() => {});
+    db.markItemNotified(item.id);
+    if (item.notify_count >= 2) {
+      await client.chat.postMessage({
+        channel: launch.channel_id,
+        text: `🔁 <@${launch.pm_user_id}> — <@${item.owner_id}> hasn't responded on *${item.title}* after multiple reminders.`,
+      }).catch(() => {});
+    }
+  }
+  return stale.length;
+}
+
 /**
  * Start the scheduled jobs.
  * @param {import('@slack/web-api').WebClient} client
@@ -65,23 +119,7 @@ export function startScheduler(client) {
     try {
       const activeLaunches = db.getAllActiveLaunches();
       for (const launch of activeLaunches) {
-        const items = db.getItemsByLaunch(launch.id).filter(i => i.status !== 'done' && i.owner_id);
-        const byOwner = new Map();
-        for (const item of items) {
-          const existing = byOwner.get(item.owner_id) ?? [];
-          byOwner.set(item.owner_id, [...existing, item]);
-        }
-        for (const [ownerId, ownerItems] of byOwner.entries()) {
-          const topItem = ownerItems[0];
-          await client.chat.postMessage({
-            channel: ownerId,
-            text: `Daily check-in for ${launch.name}`,
-            blocks: buildStandupBlocks({
-              itemTitle: topItem.title, launchName: launch.name, launchDate: launch.launch_date,
-              itemId: topItem.id, launchId: launch.id,
-            }),
-          }).catch(err => console.error(`[Standup] DM failed for ${ownerId}:`, err.message));
-        }
+        await sendStandupForLaunch(client, launch);
       }
       console.log('[scheduler] Standup check-ins complete');
     } catch (err) {
@@ -93,24 +131,8 @@ export function startScheduler(client) {
   slaCheckTask = cron.schedule('0 * * * *', async () => {
     console.log('[scheduler] Running SLA check...');
     try {
-      const stale = db.getStaleItems(24);
-      for (const item of stale) {
-        const launch = db.getLaunchById(item.launch_id);
-        if (!launch) continue;
-        await client.chat.postMessage({
-          channel: item.owner_id,
-          text: `⏰ Reminder: *${item.title}* for *${launch.name}* still needs an update (no reply in 24h+).`,
-        }).catch(() => {});
-        db.markItemNotified(item.id);
-        // Escalation: on 3rd+ nudge, also post to launch channel tagging PM
-        if (item.notify_count >= 2) {
-          await client.chat.postMessage({
-            channel: launch.channel_id,
-            text: `🔁 <@${launch.pm_user_id}> — <@${item.owner_id}> hasn't responded on *${item.title}* after multiple reminders.`,
-          }).catch(() => {});
-        }
-      }
-      console.log(`[scheduler] SLA check complete for ${stale.length} items`);
+      const count = await runSlaCheck(client);
+      console.log(`[scheduler] SLA check complete for ${count} items`);
     } catch (err) {
       console.error('[scheduler] SLA check error:', err);
     }
@@ -163,8 +185,7 @@ export function startScheduler(client) {
     }
   }, { timezone: 'UTC' });
 
-  // Run Go/No-Go canvas check daily at 9 AM — posts the checklist canvas
-  // once a launch crosses the T-48h (config.GO_NO_GO_DAYS_BEFORE) boundary.
+  // Run Go/No-Go canvas check daily at 9 AM
   gonogoCheckTask = cron.schedule('0 9 * * *', async () => {
     console.log('[scheduler] Running Go/No-Go canvas check...');
     try {
@@ -178,9 +199,7 @@ export function startScheduler(client) {
     }
   }, { timezone: 'UTC' });
 
-  // Run deadline-reminder check daily at 9 AM — mirrors the PR-check
-  // pattern: walk active launches, fire any reminder that just crossed
-  // its configured threshold.
+  // Run deadline-reminder check daily at 9 AM
   deadlineCheckTask = cron.schedule('0 9 * * *', async () => {
     console.log('[scheduler] Running deadline reminder check...');
     try {

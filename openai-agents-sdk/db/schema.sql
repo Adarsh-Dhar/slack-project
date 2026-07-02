@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS budget_items (
   approved_amount TEXT,
   spent_amount    TEXT,
   approver        TEXT,
+  approval_status TEXT DEFAULT 'pending' CHECK (approval_status IN ('pending', 'approved', 'rejected')),
   updated_by      TEXT,
   updated_at      TEXT DEFAULT (datetime('now')),
   created_at      TEXT DEFAULT (datetime('now')),
@@ -153,4 +154,32 @@ CREATE TABLE IF NOT EXISTS cs_readiness_items (
   updated_at  TEXT DEFAULT (datetime('now')),
   created_at  TEXT DEFAULT (datetime('now')),
   UNIQUE(launch_id, item)
+);
+
+-- Risk assessments per launch category.
+CREATE TABLE IF NOT EXISTS risk_items (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  launch_id   INTEGER NOT NULL REFERENCES launches(id),
+  category    TEXT NOT NULL CHECK (category IN ('technical', 'legal', 'market_timing', 'other')),
+  level       TEXT NOT NULL DEFAULT 'medium' CHECK (level IN ('low', 'medium', 'high')),
+  note        TEXT,
+  updated_by  TEXT,
+  updated_at  TEXT DEFAULT (datetime('now')),
+  created_at  TEXT DEFAULT (datetime('now')),
+  UNIQUE(launch_id, category)
+);
+
+-- Marketing/docs/sales copy review and approval.
+CREATE TABLE IF NOT EXISTS content_reviews (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  launch_id    INTEGER NOT NULL REFERENCES launches(id),
+  content_type TEXT NOT NULL CHECK (content_type IN ('marketing', 'docs', 'sales')),
+  link         TEXT,
+  status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'changes_requested')),
+  submitted_by TEXT NOT NULL,
+  reviewer     TEXT,
+  note         TEXT,
+  updated_at   TEXT DEFAULT (datetime('now')),
+  created_at   TEXT DEFAULT (datetime('now')),
+  UNIQUE(launch_id, content_type)
 );

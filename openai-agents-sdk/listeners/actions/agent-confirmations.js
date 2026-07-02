@@ -9,6 +9,7 @@ import { config } from '../../config.js';
 import { resolvePlainMentions } from '../../utils/resolveMentions.js';
 import { syncMembersForPhaseChange, announcePhaseChange } from '../../services/phaseManager.js';
 import { postRetroPrompt } from '../../services/retro.js';
+import { postLaunchDayRunbook } from '../../services/runbook.js';
 
 function inferTeam(channelName) {
   const name = channelName.toLowerCase();
@@ -138,6 +139,13 @@ export function register(app) {
 
       db.updateLaunchPhase(launch_id, new_phase);
       await announcePhaseChange(client, launch, new_phase, added, removed);
+
+      // Mirror what the automated phase sync does: post the runbook when
+      // manually forcing into launchday so the war room is always set up.
+      if (new_phase === 'launchday') {
+        await postLaunchDayRunbook(client, { ...launch, channel_id: launch.channel_id })
+          .catch(err => console.error('[sync_phase_confirm] runbook post failed:', err.message));
+      }
 
       await respond({
         text: `✅ Phase updated from ${oldPhase} to ${new_phase}`,

@@ -463,3 +463,59 @@ export function upsertCsReadinessItem({ launchId, item, link, status, updatedBy 
 export function getCsReadinessForLaunch(launchId) {
   return db.prepare('SELECT * FROM cs_readiness_items WHERE launch_id = ? ORDER BY created_at ASC').all(launchId);
 }
+
+// ─── Risk helpers ─────────────────────────────────────────────────────────────
+
+export function upsertRiskItem({ launchId, category, level, note, updatedBy }) {
+  db.prepare(
+    `INSERT INTO risk_items (launch_id, category, level, note, updated_by)
+     VALUES (@launchId, @category, @level, @note, @updatedBy)
+     ON CONFLICT(launch_id, category) DO UPDATE SET
+       level = excluded.level, note = excluded.note,
+       updated_by = excluded.updated_by, updated_at = datetime('now')`
+  ).run({ launchId, category, level, note: note ?? null, updatedBy });
+}
+
+export function getRiskItemsForLaunch(launchId) {
+  return db.prepare('SELECT * FROM risk_items WHERE launch_id = ? ORDER BY created_at ASC').all(launchId);
+}
+
+// ─── Budget approval helper ───────────────────────────────────────────────────
+
+export function setBudgetApproval({ launchId, category, status, approver }) {
+  db.prepare(
+    `UPDATE budget_items SET approval_status = ?, approver = ?, updated_at = datetime('now')
+     WHERE launch_id = ? AND category = ?`
+  ).run(status, approver, launchId, category);
+}
+
+// ─── Content review helpers ───────────────────────────────────────────────────
+
+export function submitContentForReview({ launchId, contentType, link, submittedBy }) {
+  db.prepare(
+    `INSERT INTO content_reviews (launch_id, content_type, link, submitted_by)
+     VALUES (@launchId, @contentType, @link, @submittedBy)
+     ON CONFLICT(launch_id, content_type) DO UPDATE SET
+       link = excluded.link, submitted_by = excluded.submitted_by,
+       status = 'pending', updated_at = datetime('now')`
+  ).run({ launchId, contentType, link, submittedBy });
+}
+
+export function setContentReviewStatus({ launchId, contentType, status, reviewer, note }) {
+  db.prepare(
+    `UPDATE content_reviews SET status = ?, reviewer = ?, note = ?, updated_at = datetime('now')
+     WHERE launch_id = ? AND content_type = ?`
+  ).run(status, reviewer, note ?? null, launchId, contentType);
+}
+
+export function getContentReviews(launchId) {
+  return db.prepare('SELECT * FROM content_reviews WHERE launch_id = ? ORDER BY created_at ASC').all(launchId);
+}
+
+// ─── Slip events (open query) ─────────────────────────────────────────────────
+
+export function getOpenSlipEvents(launchId) {
+  return db.prepare(
+    `SELECT * FROM slip_events WHERE launch_id = ? AND status IN ('pending','confirmed','explaining') ORDER BY created_at DESC`
+  ).all(launchId);
+}
