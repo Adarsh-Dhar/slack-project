@@ -22,6 +22,7 @@
       "bot": [
         "channels:history",
         "channels:join",
+        "channels:manage",
         "channels:read",
         "chat:write",
         "commands",
