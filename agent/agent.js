@@ -188,7 +188,7 @@ const sizeOpportunityTool = tool({
   },
 });
 
-const agent = new Agent({
+export const starterAgent = new Agent({
   name: 'LaunchBot',
   instructions: SYSTEM_PROMPT,
   tools: [
@@ -231,7 +231,7 @@ export async function runAgent(inputItems, deps) {
   try {
     const resultPromise = deps.userToken
       ? runWithMcp(inputItems, deps, timeout)
-      : run(agent, inputItems, { context: deps });
+      : run(starterAgent, inputItems, { context: deps });
 
     const result = await Promise.race([resultPromise, timeout]);
     clearTimeout(timeoutHandle);
@@ -255,7 +255,7 @@ async function runWithMcp(inputItems, deps, timeout) {
   console.log(`[agent:mcp] Connected to Slack MCP server`);
 
   try {
-    const agentWithMcp = agent.clone({ mcpServers: [mcpServer] });
+    const agentWithMcp = starterAgent.clone({ mcpServers: [mcpServer] });
     const result = await run(agentWithMcp, inputItems, { context: deps });
     console.log(`[agent:mcp] Run complete.`);
     return result;
