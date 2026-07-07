@@ -3,7 +3,6 @@ import { handleAppMentioned } from './app-mentioned.js';
 import { handleAssistantThreadStarted } from './assistant-thread-started.js';
 import { handleMessage } from './message.js';
 import { register as registerSignalIntake } from './signal-intake.js';
-import { register as registerSlipCheck } from './slip-check.js';
 
 /**
  * Register event listeners with the Bolt app.
@@ -15,6 +14,5 @@ export function register(app) {
   app.event('app_mention', handleAppMentioned);
   app.event('assistant_thread_started', handleAssistantThreadStarted);
   app.event('message', handleMessage);
-  registerSlipCheck(app);
   registerSignalIntake(app);
 }

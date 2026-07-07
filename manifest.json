@@ -10,51 +10,9 @@
     },
     "slash_commands": [
       {
-        "command": "/launch",
-        "description": "Kick off a product launch workflow",
-        "usage_hint": "[\"launch-name\"] date:YYYY-MM-DD tier:major|moderate|minor",
-        "should_escape": false
-      },
-      {
-        "command": "/launch-phase",
-        "description": "Manually force a phase transition",
-        "usage_hint": "status | set <phase>",
-        "should_escape": false
-      },
-      {
-        "command": "/retro",
-        "description": "Trigger the post-launch retro early",
-        "usage_hint": "(run inside a launch channel)",
-        "should_escape": false
-      },
-      {
-        "command": "/launch-report",
-        "description": "Post a leadership-ready status report for this launch",
-        "usage_hint": "[share]",
-        "should_escape": false
-      },
-      {
-        "command": "/launch-portfolio",
-        "description": "View a cross-launch snapshot of all active launches",
-        "usage_hint": "View all active launches",
-        "should_escape": false
-      },
-      {
         "command": "/signals",
         "description": "Manage product-demand signal clusters",
         "usage_hint": "cluster | list [status] | show <id> | validate <id> | dismiss <id>",
-        "should_escape": false
-      },
-      {
-        "command": "/launch-kpi",
-        "description": "Define and update success metrics for this launch",
-        "usage_hint": "set \"Name\" target:60 unit:% | update \"Name\" 42 | list",
-        "should_escape": false
-      },
-      {
-        "command": "/launch-feedback",
-        "description": "Add retro feedback for a launch",
-        "usage_hint": "(run inside a launch channel)",
         "should_escape": false
       }
     ]
