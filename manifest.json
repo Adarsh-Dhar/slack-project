@@ -23,13 +23,11 @@
         "channels:history",
         "chat:write",
         "commands",
+        "groups:history",
         "im:history",
         "im:read",
         "im:write",
         "app_mentions:read"
-      ],
-      "app": [
-        "connections:write"
       ]
     }
   },
@@ -37,6 +35,8 @@
     "event_subscriptions": {
       "bot_events": [
         "message.im",
+        "message.channels",
+        "message.groups",
         "app_mention",
         "app_home_opened",
         "assistant_thread_started"

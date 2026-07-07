@@ -3,3 +3,4 @@ data/installations/
 *.db
 *.db-shm
 *.db-wal
+.env
