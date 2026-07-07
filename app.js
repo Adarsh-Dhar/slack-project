@@ -3,6 +3,8 @@ import 'dotenv/config';
 import { App, LogLevel } from '@slack/bolt';
 
 import { registerListeners } from './listeners/index.js';
+import { config } from './config.js';
+import { autoJoinSignalChannels } from './services/autoJoinChannels.js';
 
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
@@ -17,4 +19,9 @@ registerListeners(app);
 (async () => {
   await app.start();
   app.logger.info('Starter Agent is running!');
+  
+  // Auto-join public channels that match signal source keywords
+  if (config.AUTO_JOIN_PUBLIC_CHANNELS) {
+    await autoJoinSignalChannels(app.client, config.CHANNEL_DENYLIST);
+  }
 })();

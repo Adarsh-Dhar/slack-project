@@ -12,13 +12,21 @@ export const config = {
   SLACK_BOT_TOKEN: requireEnv('SLACK_BOT_TOKEN'),
   SLACK_SIGNING_SECRET: process.env['SLACK_SIGNING_SECRET'] ?? '',
   SLACK_APP_TOKEN: process.env['SLACK_APP_TOKEN'] ?? '',
+  SLACK_TEAM_ID: process.env['SLACK_TEAM_ID'] ?? '', // Required for enterprise installs
   PORT: parseInt(process.env['PORT'] ?? '3000', 10),
   DB_PATH: process.env['DB_PATH'] ?? './launchbot.db',
 
   // ─── Signal intake & demand validation ───────────────────────────────────
+  // Auto-join public channels that match signal source keywords
+  AUTO_JOIN_PUBLIC_CHANNELS: process.env['AUTO_JOIN_PUBLIC_CHANNELS'] === 'true',
+  
+  // Channel IDs or names to explicitly skip during auto-join
+  CHANNEL_DENYLIST: (process.env['CHANNEL_DENYLIST'] ?? '').split(',').map(s => s.trim()).filter(Boolean),
+  
   // Maps Slack channel IDs to a source_type, so ingestion is one generic
   // listener instead of five hardcoded ones. Add a new source by adding a
-  // channel here — no listener code changes needed.
+  // channel here — no listener code changes needed. This is now a fallback
+  // for channels that don't match the keyword classification rules.
   SIGNAL_SOURCE_CHANNELS: {
     [process.env['CHANNEL_SUPPORT_TICKETS'] ?? '']: 'support_ticket',
     [process.env['CHANNEL_SALES_FEEDBACK'] ?? '']: 'sales_feedback',
