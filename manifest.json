@@ -1,0 +1,94 @@
+{
+  "display_information": {
+    "name": "LaunchBot",
+    "description": "Launch coordination bot with AI agent capabilities"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "LaunchBot",
+      "always_online": true
+    },
+    "slash_commands": [
+      {
+        "command": "/launch",
+        "description": "Kick off a product launch workflow",
+        "usage_hint": "[\"launch-name\"] date:YYYY-MM-DD tier:major|moderate|minor",
+        "should_escape": false
+      },
+      {
+        "command": "/launch-phase",
+        "description": "Manually force a phase transition",
+        "usage_hint": "status | set <phase>",
+        "should_escape": false
+      },
+      {
+        "command": "/retro",
+        "description": "Trigger the post-launch retro early",
+        "usage_hint": "(run inside a launch channel)",
+        "should_escape": false
+      },
+      {
+        "command": "/launch-report",
+        "description": "Post a leadership-ready status report for this launch",
+        "usage_hint": "[share]",
+        "should_escape": false
+      },
+      {
+        "command": "/launch-portfolio",
+        "description": "View a cross-launch snapshot of all active launches",
+        "usage_hint": "View all active launches",
+        "should_escape": false
+      },
+      {
+        "command": "/signals",
+        "description": "Manage product-demand signal clusters",
+        "usage_hint": "cluster | list [status] | show <id> | validate <id> | dismiss <id>",
+        "should_escape": false
+      },
+      {
+        "command": "/launch-kpi",
+        "description": "Define and update success metrics for this launch",
+        "usage_hint": "set \"Name\" target:60 unit:% | update \"Name\" 42 | list",
+        "should_escape": false
+      },
+      {
+        "command": "/launch-feedback",
+        "description": "Add retro feedback for a launch",
+        "usage_hint": "(run inside a launch channel)",
+        "should_escape": false
+      }
+    ]
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "channels:history",
+        "chat:write",
+        "commands",
+        "im:history",
+        "im:read",
+        "im:write",
+        "app_mentions:read"
+      ],
+      "app": [
+        "connections:write"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "bot_events": [
+        "message.im",
+        "app_mention",
+        "app_home_opened",
+        "assistant_thread_started"
+      ]
+    },
+    "interactivity": {
+      "is_enabled": true
+    },
+    "org_deploy_enabled": true,
+    "socket_mode_enabled": true,
+    "token_rotation_enabled": false
+  }
+}
